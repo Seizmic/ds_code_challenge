@@ -29,7 +29,7 @@ automatically and cached under `data/raw/`, so reruns skip the network.
 | `python -m src.main --section 1` | Extraction only |
 | `python -m src.main --baseline` | Also run the naive download baseline for comparison |
 | `python -m src.main --join-method library` | Publish the H3 library assignment instead |
-| `python -m pytest tests/ -q` | 41 tests |
+| `python -m pytest tests/ -q` | 118 tests |
 
 ---
 
@@ -41,11 +41,12 @@ pipeline from the run manifest so it cannot drift from what the code did.
 | | Result |
 |---|---|
 | **Section 1** schema conformance | **1.000000** (PASS) |
+| **Section 1** polygon overlap | **0** of 10,979 adjacent pairs |
 | **Section 1** validation vs reference | **3,832 / 3,832** features, every geometry byte-identical |
 | **Section 1** transfer reduction | **98.2%** - 1.9 MB returned from a 103 MB object |
 | **Section 1** vs naive download | **3.8x faster** |
 | **Section 2** validation vs `sr_hex.csv.gz` | **99.996920%** exact match (941,605 / 941,634) |
-| **Section 2** input data conformance | **0.994767** (PASS) over 941,634 rows |
+| **Section 2** input data conformance | **0.995299** (PASS) over 941,634 rows |
 | Method agreement (geometric vs H3 library) | 99.998697% |
 | Coordinate inversion / null-island / out-of-bounds | **0** |
 | Full pipeline runtime | ~35s |
@@ -61,7 +62,7 @@ pipeline from the run manifest so it cannot drift from what the code did.
 | [docs/decisions.md](docs/decisions.md) | Multi-polygon tie-break rule and join error threshold, with motivation |
 | [docs/environment.md](docs/environment.md) | Prerequisites and machine audit |
 | [docs/plan.md](docs/plan.md) | Execution plan |
-| [AI_log.md](AI_log.md) | AI usage and the four documented corrections |
+| [AI_log.md](AI_log.md) | AI usage and the seven documented corrections |
 
 ---
 
@@ -95,8 +96,11 @@ Assigns all 941,634 service requests to exactly one H3 resolution-8 hexagon, joi
 join circular. `sr_hex.csv.gz` is reserved for validation.
 
 - **Points in two or more polygons** resolve through a strict deterministic rule: strict
-  interior first, then nearest centroid, then index order. Without it a one-to-many join
-  silently duplicates service requests and inflates every downstream count. Full rationale in
+  interior first, then the cell H3 itself assigns, then nearest centroid, then index order.
+  Without it a one-to-many join silently duplicates service requests and inflates every
+  downstream count. The rule originally led with nearest centroid; measurement showed that
+  criterion disagrees with H3 for **more than half** of points within a metre of a boundary -
+  the only regime the tie-break ever runs in. Full rationale in
   [docs/decisions.md](docs/decisions.md).
 - **The error threshold** is calibrated against the measured baseline rather than picked as a
   round number, and applies only to genuine failures - not to the legitimate
@@ -115,6 +119,7 @@ clean says nothing about how the pipeline behaves on a source that is not.
 | Layer | Checks |
 |---|---|
 | Structural (fatal) | Required columns, minimum row count |
+| Geometry | Ring count, self-intersection, axis order, **polygon overlap across the collection** |
 | Per-column | Null-rate ceilings, ID pattern and uniqueness, coordinate ranges, timestamp parseability |
 | Cross-column | Coordinate pair completeness, completion-after-creation (split by magnitude), duplicate IDs |
 | Spatial | Six-class coordinate classification, inversion hard-gate, R0-R4 outcome accounting |

@@ -7,8 +7,8 @@ number of tokens") and by the assessment brief.
 **Tool:** Claude Code (Anthropic), model `claude-opus-5`
 **Usage:** heavy. The AI drafted the documentation, wrote the pipeline code and the tests, and
 ran the analysis. It was directed and audited throughout rather than accepted as delivered.
-Six corrections are documented below; the four substantive ones were prompted by the candidate
-challenging a claim or an untested assumption, and each turned up a real defect.
+Seven corrections are documented below; the five substantive ones were prompted by the
+candidate challenging a claim or an untested assumption, and each turned up a real defect.
 
 ---
 
@@ -22,7 +22,8 @@ challenging a claim or an untested assumption, and each turned up a real defect.
 | 4 | 2026-09-20 | Data quality contract and assumption audit | ~95k / ~22k |
 | 5 | 2026-09-20 | Phase 4/5 reports, clean-clone verification, check coverage audit | ~120k / ~30k |
 | 6 | 2026-09-20 | Requirements audit, axis-order enforcement, integration tests | ~85k / ~24k |
-| | | **Total** | **~635k / ~143k** |
+| 7 | 2026-09-20 | Record tracing, tie-break revision, overlap check | ~110k / ~28k |
+| | | **Total** | **~745k / ~171k** |
 
 Figures are estimated from context size rather than exact client-reported counts.
 
@@ -117,14 +118,34 @@ code 0. See correction 6.
 
 ---
 
+### Session 7 - Record tracing and the tie-break
+
+**Asked for:** trace a record through the pipeline step by step; then one of the three unmatched
+records; then one of the 26 adjacent-cell disagreements. Then: "Make the correction. Explore the
+tie-break. What happens when the coordinate is at the boundary and the centroid of the 2
+adjoining polygons has the exact distance to the coordinate?" Then whether a polygon overlap
+check was worth adding.
+
+**Did:** traced three records end to end with real values at every stage; corrected the stated
+root cause of the C4 disagreements; measured the tie-break criterion and replaced it; added and
+tested the exact-tie case; added a collection-level polygon overlap check. See correction 7.
+
+**Also answered:** a question about a value of "AA" appearing instead of NULL. No such value was
+ever written or present - the classifier's null-token set contains `"na"` and `"n/a"`, easily
+misread. Worth stating plainly that those tokens are **defensive rather than observed**: the
+supplied data contains exactly one non-numeric coordinate value, the empty string. Unlike every
+threshold in the config, that token set is not calibrated against this dataset.
+
+---
+
 ## Corrections and improvements
 
 The brief requires at least one documented instance where AI output was corrected. There are
-six below, split by who caught them, because that distinction is the point of the section.
+seven below, split by who caught them, because that distinction is the point of the section.
 
-**Candidate-driven (2, 3, 5, 6)** - Naveen's questions caused these. Each began as a challenge
-to a claim the AI had made, or to an assumption it had left unexamined, and each turned up a
-real defect. These are the substantive ones.
+**Candidate-driven (2, 3, 5, 6, 7)** - Naveen's questions caused these. Each began as a
+challenge to a claim the AI had made, or to an assumption it had left unexamined, and each
+turned up a real defect. These are the substantive ones.
 
 **AI-caught (1, 4)** - found by the tool mid-task. Recorded for completeness, but they do not
 satisfy the brief's requirement, and are labelled as such rather than quietly padding the list.
@@ -348,9 +369,67 @@ a wholesale swap reports as inversion rather than as "longitude out of range". 8
 and `  completion_after_creation:` is a substring of the four-space-indented weights entry, so
 the block was injected twice and broke the schema. The suite caught it immediately.
 
+### 7. Candidate-driven - a stated root cause that was wrong, and a rule that was worse
+
+Naveen asked for a record to be traced through the pipeline, then for one of the 26
+adjacent-cell disagreements specifically, then to explore the tie-break. Each step invalidated
+something the AI had previously asserted.
+
+**The stated root cause was wrong.** Earlier commits explained the 26 disagreements as the
+supplied polygons "drifting slightly from the true H3 cell boundaries". Measuring it:
+
+```
+supplied polygon vertices vs h3.cell_to_boundary()
+  max per-vertex deviation : 0.0000 m  (identical to within 1e-6)
+```
+
+The vertices are exact. The difference lies **between** them - a GeoJSON polygon joins its
+vertices with straight lines in longitude/latitude space, while an H3 edge follows a geodesic in
+the library's icosahedral projection. The curves meet at every vertex and separate slightly in
+between. All four disagreeing coordinates sit within **2 mm** of a seam, the closest at 0.1289
+mm; of 460,413 unique pairs only two lie within 1 mm.
+
+**The tie-break rule itself was then measured, and was worse.** `docs/decisions.md` justified
+nearest-centroid as approximating "what `h3.latlng_to_cell` itself does". Sampling 4,000 points
+against the cell H3 assigns them to:
+
+| Distance from boundary | Nearest-centroid disagrees with H3 |
+|---|---|
+| 0 - 1 m | **55.6%** |
+| 1 - 5 m | 18.2% |
+| > 10 m | 0.0% |
+
+Overall agreement is 99.75%, which reads well and is actively misleading. The entire
+disagreement is concentrated near boundaries, and **the tie-break only ever runs on points that
+are on a boundary**. In its sole operating regime the criterion was close to a coin flip, and
+the reassuring headline number was measuring the regime where the rule never applies.
+
+H3 cell membership is defined by the library's own projection, not by spherical proximity to a
+centre, so the approximation was never necessary. The rule now leads with the library's
+assignment, constrained to the candidate set so the geometric join still decides which polygons
+are eligible.
+
+**On the exact-tie question.** Naveen asked what happens when two centroids are exactly
+equidistant. It is reachable rather than hypothetical: haversine depends on `sin^2(dlon/2)` and
+`sin^2` is even, so two centroids mirrored about a point at the same latitude give bit-identical
+distances. Criterion 3 (lexicographic index) resolves it, `margin_m` is `0.0`, and the case is
+now constructed and tested directly, including stability under input reordering.
+
+**On the overlap question.** Asked whether a polygon overlap check was worth adding, the answer
+was yes - not because it finds anything here (it finds nothing; all 10,979 adjacent pairs share
+edges as zero-area lines) but because the existing guard was *point-driven*: it only fired where
+a service request happened to land in an overlap, so an overlap in an empty area was invisible.
+It checks the cause in the input rather than the symptom in the output.
+
+**One AI-caught slip during the same session**, worth recording because of what it repeats: the
+patch updating `docs/decisions.md` to the new tie-break **failed silently** while the commit
+went through regardless, leaving the document describing the old rule. That is correction 6's
+failure mode - a document asserting behaviour the code does not have - recurring within the
+hour, in the very commit that documented correction 6's lesson.
+
 ## Standing lesson
 
-Four of the six corrections share one root cause: **the AI validated against the data in front
+Five of the seven corrections share one root cause: **the AI validated against the data in front
 of it and reported the result as a general property.** Clean data scored well, so the checks
 looked adequate; a rounded fixture still passed, so the test looked adequate; a published
 constant was close enough, so it went unchecked. In each case the output was confident and the
@@ -373,3 +452,15 @@ Documentation and intent are cheap to produce and read as progress. Both times, 
 record made the work look more complete than it was, and the discrepancy was only visible to
 someone who went back and checked the code against the document rather than reading the
 document alone.
+
+**Correction 7 shows the second mode surviving even its own diagnosis.** The commit that
+recorded "dead documentation asserting behaviour the code does not have" as a lesson was
+followed, within the hour, by a documentation patch that failed silently while its commit
+succeeded - leaving `decisions.md` describing a tie-break rule the code no longer had.
+
+Correction 7 also sharpened the first mode. The claim that nearest-centroid "approximates what
+H3 does" was never tested, and its 99.75% agreement looked like confirmation. That number
+averages over a population the rule never sees. Measured in the regime where the rule actually
+operates - points on a boundary - it was wrong more than half the time. A summary statistic
+computed over the wrong population is not weak evidence; it is misleading evidence, and it read
+as reassurance for several sessions.
