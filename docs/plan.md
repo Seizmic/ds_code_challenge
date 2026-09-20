@@ -5,8 +5,6 @@
 Budget: **~8 hours** (per the brief) against a deadline of **23:59 SAST, Tue 22 Sep 2026**.
 Today is Sun 20 Sep 2026, leaving roughly two calendar days.
 
-Nothing below has been started. Phase 0 is blocked on your sign-off.
-
 ---
 
 ## Phase 0 - Prerequisites (~10 min)
