@@ -51,6 +51,9 @@ class TestIndividualRulesFire:
             ("hex_missing_centroid", "centroid_present"),
             ("hex_centroid_outside_polygon", "centroid_within_polygon"),
             ("hex_wrong_resolution", "resolution_correct"),
+            ("hex_self_intersecting", "geometry_simple"),
+            ("hex_with_hole", "geometry_single_ring"),
+            ("hex_inverted_geometry_only", "axis_order"),
         ],
     )
     def test_corruption_drops_its_rule(self, clean, schema, builder, rule):
@@ -96,6 +99,22 @@ class TestIndividualRulesFire:
 
         assert report["rule_scores"]["coordinates_in_bounds"] < 1.0
         assert report["rule_scores"]["centroid_within_polygon"] < 1.0
+
+    def test_self_intersection_was_previously_undetected(self, clean, schema):
+        """A bow-tie passes type, position-count and closure.
+
+        The old `geometry_valid` score was the minimum of those three, so a
+        self-intersecting hexagon scored as valid. This asserts the gap is
+        closed rather than merely that the new rule exists.
+        """
+        corrupted = [*clean[:-1], synthetic.hex_self_intersecting()]
+        report = score_conformance(corrupted, schema)
+
+        assert report["rule_scores"]["geometry_type"] == 1.0
+        assert report["rule_scores"]["geometry_positions"] == 1.0
+        assert report["rule_scores"]["geometry_closed"] == 1.0
+        assert report["rule_scores"]["geometry_simple"] < 1.0
+        assert report["rule_scores"]["geometry_valid"] < 1.0
 
     def test_malformed_feature_does_not_raise(self, clean, schema):
         """A rule must score a broken feature as failing, never crash on it.

@@ -15,6 +15,7 @@ own right.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -24,7 +25,14 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import Polygon
 
-from src import config, coverage, quality_checks, sr_validation
+from src import (
+    config,
+    coverage,
+    extract_hex,
+    quality_checks,
+    s3_io,
+    sr_validation,
+)
 from src.logging_setup import MANIFEST, timed
 from src.quality_checks import CoordClass
 
@@ -298,8 +306,6 @@ def load_service_requests(client) -> pd.DataFrame:
     Identifiers are read as strings because they carry leading zeros that type
     inference would silently destroy, corrupting the validation join key (E4).
     """
-    from src import s3_io
-
     path = s3_io.download_cached(client, config.KEY_SR)
     return pd.read_csv(
         path,
@@ -321,8 +327,6 @@ def validate_against_reference(
     ``notification_number`` rather than compared positionally, so the result
     does not silently depend on both files being in the same row order.
     """
-    from src import s3_io
-
     path = s3_io.download_cached(client, config.KEY_SR_HEX)
     reference = pd.read_csv(
         path,
@@ -423,10 +427,6 @@ def validate_against_reference(
 
 def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[str, Any]:
     """Execute Section 2 end to end."""
-    import json
-
-    from src import extract_hex, s3_io
-
     client = client or s3_io.make_s3_client()
 
     if hex_features is None:

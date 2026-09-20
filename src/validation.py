@@ -18,6 +18,8 @@ import logging
 import re
 from typing import Any, Callable
 
+from shapely.geometry import Polygon
+
 logger = logging.getLogger(__name__)
 
 Feature = dict[str, Any]
@@ -112,8 +114,9 @@ def rule_centroid_within_polygon(feature: Feature, schema: dict) -> bool:
     if not ring or not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
         return False
 
-    # Ray casting -- deliberately dependency-free so validation does not require
-    # the geospatial stack to be importable.
+    # Ray casting, done inline rather than via shapely: this runs per feature
+    # and a point-in-polygon test on seven positions is cheaper than building a
+    # geometry object for each one.
     inside = False
     n = len(ring)
     for i in range(n - 1):
@@ -124,6 +127,66 @@ def rule_centroid_within_polygon(feature: Feature, schema: dict) -> bool:
             if lon < x_at:
                 inside = not inside
     return inside
+
+
+def rule_single_ring(feature: Feature, schema: dict) -> bool:
+    """Exactly one ring: an H3 cell has no holes.
+
+    The schema declared ``rings: 1`` from the start but nothing read it, so a
+    polygon carrying interior rings would have scored as valid.
+    """
+    try:
+        rings = feature["geometry"]["coordinates"]
+    except (KeyError, TypeError):
+        return False
+    return isinstance(rings, list) and len(rings) == schema["geometry"]["rings"]
+
+
+def rule_geometry_simple(feature: Feature, schema: dict) -> bool:
+    """The polygon must not self-intersect.
+
+    The schema declared ``must_be_valid: true  # no self-intersection`` but the
+    old ``geometry_valid`` score was only the minimum of the type, position-count
+    and closure rules - none of which detect a bow-tie. A self-intersecting
+    hexagon passed every check.
+    """
+    if not schema["geometry"].get("must_be_valid", False):
+        return True
+    ring = _ring(feature)
+    if len(ring) < 4:
+        return False
+    try:
+        return Polygon(ring).is_valid
+    except Exception:  # noqa: BLE001 - malformed input is a rule failure, not a crash
+        return False
+
+
+def rule_axis_order(feature: Feature, schema: dict) -> bool:
+    """Positions must be [longitude, latitude], per RFC 7946.
+
+    Named explicitly rather than left implicit in the bounds rule, because axis
+    inversion is the defect most likely to arrive from an upstream change and
+    the one whose symptom - a join that matches nothing - points away from its
+    cause. Reliable for Cape Town because the longitude range (+18 to +19) and
+    the latitude range (-34 to -33) are disjoint and opposite in sign, so a
+    swapped pair cannot masquerade as a valid one.
+    """
+    if schema["geometry"].get("axis_order") != "lon_lat":
+        return True
+    bounds = schema["geometry"]["bounds"]
+    ring = _ring(feature)
+    if not ring:
+        return False
+    for position in ring:
+        try:
+            first, second = position[0], position[1]
+        except (IndexError, TypeError):
+            return False
+        # A swapped position puts latitude first and longitude second.
+        if (bounds["lat"][0] <= first <= bounds["lat"][1]
+                and bounds["lon"][0] <= second <= bounds["lon"][1]):
+            return False
+    return True
 
 
 def rule_resolution_correct(feature: Feature, schema: dict) -> bool:
@@ -145,6 +208,9 @@ RULES: dict[str, RuleFn] = {
     "geometry_type": rule_geometry_type,
     "geometry_positions": rule_geometry_positions,
     "geometry_closed": rule_geometry_closed,
+    "geometry_single_ring": rule_single_ring,
+    "geometry_simple": rule_geometry_simple,
+    "axis_order": rule_axis_order,
     "coordinates_in_bounds": rule_coordinates_in_bounds,
     "centroid_present": rule_centroid_present,
     "centroid_in_bounds": rule_centroid_in_bounds,
@@ -193,6 +259,8 @@ def score_conformance(features: list[Feature], schema: dict) -> dict[str, Any]:
         rule_scores["geometry_type"],
         rule_scores["geometry_positions"],
         rule_scores["geometry_closed"],
+        rule_scores["geometry_single_ring"],
+        rule_scores["geometry_simple"],
     )
 
     total_weight = sum(weights.get(name, 0.0) for name in rule_scores)
@@ -266,7 +334,11 @@ def compare_to_reference(
     """
     cfg = schema["comparison"]
     key = cfg["key"]
-    compare_props = cfg["compare_properties"]
+    # Honour the declared exclusions rather than relying on compare_properties
+    # happening to omit them: dead config that merely describes intent is
+    # indistinguishable from a check that does not run.
+    excluded = set(cfg.get("extraction_only_properties", []))
+    compare_props = [p for p in cfg["compare_properties"] if p not in excluded]
     tolerance = float(cfg["coordinate_tolerance_deg"])
 
     def index_of(features: list[Feature]) -> dict[str, Feature]:

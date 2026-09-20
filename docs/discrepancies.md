@@ -327,3 +327,67 @@ lie exactly on the polygon edge once curvature is accounted for. On an interior
 edge it lands inside one of the two cells; on an outer rim it lands outside
 altogether, producing R4. Fixtures for boundary cases therefore use exact
 vertices rather than derived midpoints wherever the distinction matters.
+
+---
+
+## H. Requirements audit (2026-09-20)
+
+Line-by-line audit of the implementation against the literal wording of the
+upstream README, rather than against a remembered summary of it.
+
+### Section 1
+
+| Requirement | Status |
+|---|---|
+| "Use the AWS S3 SELECT command to read in the H3 resolution 8 data from `city-hex-polygons-8-10.geojson`" | Met - `src/s3_io.py`, `SelectObjectContent` |
+| "Use the `city-hex-polygons-8.geojson` file to validate your work" | Met - 3,832/3,832, geometries byte-identical |
+| "add an additional validation that checks conformance to a reasonable schema" | Met - 15 weighted rules |
+| "conformance score of some sort, with a non-binary threshold of your choice" | Met - fractional per rule, weighted mean, pass/warn/fail bands |
+| "Explicitly capture the desired schema... in a standalone configuration or documentation file" | Met - `config/hex_schema.yaml` |
+| "log the time taken... **as well as the validation steps**" | Met - conformance and comparison timed separately |
+| "try to optimise latency and computational resources" | Met - 98.2% transfer reduction, 3.8x vs baseline |
+
+### Section 2
+
+| Requirement | Status |
+|---|---|
+| "Join... such that each service request is assigned to a single H3 resolution level 8 hexagon" | Met - R0-R4 guarantees exactly one row out per row in |
+| "Use the `sr_hex.csv.gz` file to validate your work" | Met - 99.996920% |
+| "For any requests where the `Latitude` and `Longitude` fields are empty, set the index value to `0`" | Met - all 212,364 match the reference exactly |
+| "Use your judgement to include any other appropriate validation" | Met - see the data contract |
+| "logging that lets the executor know how many of the records failed to join" | Met - per-rule counts and shares |
+| "include a join error threshold above which the script will error out" | Met - raises on breach |
+| "Please motivate why you have selected the error threshold" | Met - `decisions.md` section 2 |
+| "log the time taken" / "optimise latency" | Met - every stage timed into the run manifest |
+
+### Gaps found and closed
+
+The audit found five, four of which were real defects rather than omissions.
+
+| # | Gap | Resolution |
+|---|---|---|
+| H1 | **Five imports were inside functions**, against the README's explicit instruction to "place `import` and `library()` commands at the top of your scripts". The dependency graph was checked and is a clean DAG - no circular import justified them. | All moved to module top. |
+| H2 | **No integration test**, despite the README naming "unit and even integration tests" for Data Engineers, and despite Phase 5 of our own plan listing one. | `tests/test_integration.py` - 9 tests running `transform_join.run()` end to end against a stubbed client. |
+| H3 | **`must_be_valid: true  # no self-intersection` was declared but never enforced.** The `geometry_valid` score was only the minimum of the type, position-count and closure rules, none of which detect a bow-tie. A self-intersecting hexagon scored as valid. | `geometry_simple` rule added using shapely; `geometry_valid` now includes it. |
+| H4 | **`rings: 1` (no holes) declared but never enforced.** | `geometry_single_ring` rule added. |
+| H5 | **`axis_order: lon_lat` declared but never enforced** - it was a comment describing intent, not a check. | `axis_order` rule added on both the hexagon and service request sides. |
+
+`centroid_within_own_polygon` at collection level duplicated an existing
+feature rule and was removed; `extraction_only_properties` was being honoured
+only by coincidence (because `compare_properties` happened to omit
+`resolution`) and is now read explicitly.
+
+Dead configuration is worse than missing configuration: it documents a check
+that does not run, and a reader auditing the schema would reasonably conclude
+self-intersection was covered.
+
+### H6 - the integration test caught a live regression immediately
+
+Moving `import json` out of `run()` for H1 removed it without adding it at
+module top. **All 83 unit tests still passed**, because not one of them calls
+`run()`. The first integration test failed with `NameError: name 'json' is not
+defined` - a fault that would have broken the real pipeline on its next run.
+
+That is the case for integration tests stated better than any argument: the
+unit suite verified every rule in isolation and was blind to the module being
+unable to execute.

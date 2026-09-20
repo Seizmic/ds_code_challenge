@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -41,8 +42,6 @@ def extract_via_naive_download(client) -> list[dict[str, Any]]:
     and on a second run made S3 Select look 0.5x "faster" than a baseline that
     never touched the network. A cached baseline is not a baseline.
     """
-    import tempfile
-
     with timed("section1.naive_baseline", logger):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / config.KEY_HEX_8_10

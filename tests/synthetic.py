@@ -124,6 +124,29 @@ def hex_inverted_geometry_only() -> dict[str, Any]:
     return f
 
 
+def hex_self_intersecting() -> dict[str, Any]:
+    """A bow-tie: swap two positions so the ring crosses itself.
+
+    Passes the type, position-count and closure rules, which is exactly why the
+    old `geometry_valid` score missed it entirely.
+    """
+    f = hex_feature()
+    ring = f["geometry"]["coordinates"][0]
+    ring[1], ring[3] = ring[3], ring[1]
+    return f
+
+
+def hex_with_hole() -> dict[str, Any]:
+    """A second interior ring. An H3 cell has no holes."""
+    f = hex_feature()
+    outer = f["geometry"]["coordinates"][0]
+    lat, lon = h3.cell_to_latlng(ANCHOR_CELL)
+    inner = [[lon + 0.0005, lat], [lon, lat + 0.0005],
+             [lon - 0.0005, lat], [lon + 0.0005, lat]]
+    f["geometry"]["coordinates"] = [outer, inner]
+    return f
+
+
 def hex_out_of_bounds() -> dict[str, Any]:
     """A geometrically valid cell in the wrong city (Johannesburg)."""
     return hex_feature(h3.latlng_to_cell(-26.2041, 28.0473, 8))

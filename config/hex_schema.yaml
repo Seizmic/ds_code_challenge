@@ -98,7 +98,6 @@ collection:
   # straddle the municipal boundary.
   min_features: 2500
   max_features: 5000
-  centroid_within_own_polygon: true
 
 # -----------------------------------------------------------------------------
 # Conformance scoring
@@ -121,6 +120,9 @@ scoring:
     geometry_type: 2.0
     geometry_positions: 2.0
     geometry_closed: 2.0
+    geometry_single_ring: 2.0
+    geometry_simple: 3.0        # self-intersection: previously undetected
+    axis_order: 3.0             # inversion: the highest-consequence defect
     coordinates_in_bounds: 2.0
 
     # Attribute correctness.

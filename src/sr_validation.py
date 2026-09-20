@@ -105,6 +105,17 @@ def score(df: pd.DataFrame, schema: dict[str, Any]) -> dict[str, Any]:
     )
     record("coordinate_pair_completeness", lat_blank == lon_blank)
 
+    # Axis inversion, named explicitly. The range rules above already reject a
+    # swapped pair, but they report it as "longitude out of range", which sends
+    # the reader looking for a geocoding fault rather than a transposed column.
+    # Detectable because Cape Town's ranges are disjoint and opposite in sign.
+    lat_spec, lon_spec = columns["latitude"], columns["longitude"]
+    swapped = (
+        lat.between(lon_spec["min"], lon_spec["max"])
+        & lon.between(lat_spec["min"], lat_spec["max"])
+    )
+    record("coordinate_axis_order", ~(swapped & ~lat_blank & ~lon_blank))
+
     # --- Temporal ------------------------------------------------------------
     created = pd.to_datetime(df["creation_timestamp"], errors="coerce", utc=True)
     completed = pd.to_datetime(df["completion_timestamp"], errors="coerce", utc=True)
@@ -166,6 +177,11 @@ def score(df: pd.DataFrame, schema: dict[str, Any]) -> dict[str, Any]:
         violations["coordinate_pair_completeness"] = {
             "rate": pair_rate, "limit": pair_limit
         }
+
+    axis_limit = schema["consistency"]["coordinate_axis_order"]["max_violation_fraction"]
+    axis_rate = 1.0 - rule_scores["coordinate_axis_order"]
+    if axis_rate > axis_limit:
+        violations["coordinate_axis_order"] = {"rate": axis_rate, "limit": axis_limit}
 
     temporal = schema["consistency"]["completion_after_creation"]
     minor_rate = 1.0 - rule_scores["completion_after_creation"]
@@ -232,6 +248,14 @@ def log_report(report: dict[str, Any], schema: dict[str, Any]) -> None:
 
 def enforce(report: dict[str, Any], schema: dict[str, Any]) -> None:
     """Fail the pipeline on a failing verdict or a consistency violation."""
+    if "coordinate_axis_order" in report["consistency_violations"]:
+        rate = report["consistency_violations"]["coordinate_axis_order"]["rate"]
+        raise SchemaViolationError(
+            f"{rate:.2%} of records have inverted coordinates - latitude and "
+            "longitude appear transposed. Refusing to proceed: an axis swap "
+            "produces a join that matches almost nothing, which reads as a "
+            "coverage problem rather than a coordinate one."
+        )
     if report["consistency_violations"]:
         raise SchemaViolationError(
             "Cross-column consistency violated: "

@@ -4,7 +4,7 @@
 figure below is read from the manifest of the run that produced it, so this
 document cannot drift from what the code actually did.
 
-Run started `2026-09-20T18:28:57+0200` on Python `3.14.3`.
+Run started `2026-09-20T18:49:14+0200` on Python `3.14.3`.
 
 ---
 
@@ -18,7 +18,7 @@ Run started `2026-09-20T18:28:57+0200` on Python `3.14.3`.
 | Bytes scanned | 108,254,980 |
 | Bytes returned | 1,946,734 |
 | **Transfer reduction** | **98.202%** |
-| Extraction time | 2.920s |
+| Extraction time | 3.242s |
 
 ### Validation against `city-hex-polygons-8.geojson`
 
@@ -73,9 +73,9 @@ vertex cases explicitly.
 ### Efficiency
 
 - Unique coordinate pairs: **460,413** (63.1% of geolocated rows, 1.58x less join work)
-- Geometric join: 0.779s
-- H3 library assignment: 0.385s
-- **Total pipeline: 33.2s**
+- Geometric join: 0.770s
+- H3 library assignment: 0.391s
+- **Total pipeline: 33.3s**
 
 ## Method comparison - geometric vs H3 library
 
@@ -135,7 +135,7 @@ discard the coverage finding above. Set `config.JOIN_METHOD` or pass
 
 ## Input data contract
 
-Service request conformance: **0.994767** (PASS) over 941,634 rows
+Service request conformance: **0.995299** (PASS) over 941,634 rows
 
 Rules scoring below 1.0 (always reported individually, whatever the
 aggregate, since a weighted mean can hide a systematic fault):
@@ -160,5 +160,5 @@ No cross-column consistency violations.
 | `section2.class_d_threshold` | **PASS** | 0.00000000 vs 0.0 |
 | `section2.no_enclosed_holes` | **PASS** | 1 near-enclosed gap(s), 0 fully enclosed |
 | `section2.reference_match` | **PASS** | 0.99996920 exact match vs threshold 0.999 (29 known differences) |
-| `section2.sr_data_contract` | **PASS** | score=0.994767 verdict=pass |
+| `section2.sr_data_contract` | **PASS** | score=0.995299 verdict=pass |
 

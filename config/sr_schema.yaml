@@ -130,6 +130,17 @@ consistency:
       no-geolocation sentinel, hiding the fault inside an expected count.
     max_violation_fraction: 0.0
 
+  coordinate_axis_order:
+    description: >
+      latitude and longitude must not be transposed. The per-column range rules
+      already reject a swapped pair, but they report it as a longitude out of
+      range, which points at a geocoding fault rather than at the real cause.
+      This rule names it, so the failure message says what actually happened.
+
+      Reliable because Cape Town's ranges are disjoint and opposite in sign:
+      longitude +18 to +19, latitude -34 to -33.
+    max_violation_fraction: 0.0
+
   completion_after_creation:
     description: >
       A request cannot be completed before it was created. Split by magnitude,
@@ -168,6 +179,7 @@ scoring:
     latitude_in_range: 3.0
     longitude_in_range: 3.0
     coordinate_pair_completeness: 3.0
+    coordinate_axis_order: 3.0
 
     # Temporal.
     creation_timestamp_parseable: 2.0
