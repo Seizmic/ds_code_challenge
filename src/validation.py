@@ -1,0 +1,326 @@
+"""Schema conformance scoring and reference validation for the hexagon dataset.
+
+The conformance score is non-binary in two distinct senses, both of which the
+challenge asks for:
+
+1. Each rule scores the *fraction* of features satisfying it, in ``[0, 1]`` --
+   not a pass/fail flag. One bad feature in 3,000 scores 0.9997, not 0.
+2. The aggregate is a weighted mean of rule scores, graded against pass / warn /
+   fail bands rather than a single cutoff, so a marginal result stays visible
+   instead of being rounded to a verdict.
+
+Rules are driven entirely by ``config/hex_schema.yaml``; none are hard-coded here.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
+
+Feature = dict[str, Any]
+RuleFn = Callable[[Feature, dict[str, Any]], bool]
+
+
+# --- Individual rules --------------------------------------------------------
+# Each returns True when the feature satisfies the rule. Rules must never raise
+# on malformed input -- a malformed feature is a rule failure, not a crash.
+
+def _props(feature: Feature) -> dict[str, Any]:
+    return feature.get("properties") or {}
+
+
+def _ring(feature: Feature) -> list:
+    try:
+        return feature["geometry"]["coordinates"][0]
+    except (KeyError, IndexError, TypeError):
+        return []
+
+
+def rule_index_present(feature: Feature, schema: dict) -> bool:
+    return bool(_props(feature).get("index"))
+
+
+def rule_index_pattern(feature: Feature, schema: dict) -> bool:
+    pattern = schema["properties"]["index"]["pattern"]
+    value = _props(feature).get("index")
+    return isinstance(value, str) and re.fullmatch(pattern, value) is not None
+
+
+def rule_geometry_type(feature: Feature, schema: dict) -> bool:
+    expected = schema["geometry"]["type"]
+    return (feature.get("geometry") or {}).get("type") == expected
+
+
+def rule_geometry_positions(feature: Feature, schema: dict) -> bool:
+    return len(_ring(feature)) == schema["geometry"]["positions"]
+
+
+def rule_geometry_closed(feature: Feature, schema: dict) -> bool:
+    ring = _ring(feature)
+    return len(ring) >= 2 and ring[0] == ring[-1]
+
+
+def rule_coordinates_in_bounds(feature: Feature, schema: dict) -> bool:
+    bounds = schema["geometry"]["bounds"]
+    ring = _ring(feature)
+    if not ring:
+        return False
+    for position in ring:
+        try:
+            lon, lat = position[0], position[1]
+        except (IndexError, TypeError):
+            return False
+        if not (bounds["lon"][0] <= lon <= bounds["lon"][1]):
+            return False
+        if not (bounds["lat"][0] <= lat <= bounds["lat"][1]):
+            return False
+    return True
+
+
+def rule_centroid_present(feature: Feature, schema: dict) -> bool:
+    props = _props(feature)
+    return isinstance(props.get("centroid_lat"), (int, float)) and isinstance(
+        props.get("centroid_lon"), (int, float)
+    )
+
+
+def rule_centroid_in_bounds(feature: Feature, schema: dict) -> bool:
+    props = _props(feature)
+    lat, lon = props.get("centroid_lat"), props.get("centroid_lon")
+    if not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return False
+    spec = schema["properties"]
+    return (
+        spec["centroid_lat"]["min"] <= lat <= spec["centroid_lat"]["max"]
+        and spec["centroid_lon"]["min"] <= lon <= spec["centroid_lon"]["max"]
+    )
+
+
+def rule_centroid_within_polygon(feature: Feature, schema: dict) -> bool:
+    """Centroid must lie inside its own polygon.
+
+    This is the single most effective check against axis inversion: if latitude
+    and longitude were swapped in either the centroid or the ring, the point
+    lands far outside and this fails for essentially every feature at once.
+    """
+    props = _props(feature)
+    lat, lon = props.get("centroid_lat"), props.get("centroid_lon")
+    ring = _ring(feature)
+    if not ring or not isinstance(lat, (int, float)) or not isinstance(lon, (int, float)):
+        return False
+
+    # Ray casting -- deliberately dependency-free so validation does not require
+    # the geospatial stack to be importable.
+    inside = False
+    n = len(ring)
+    for i in range(n - 1):
+        x1, y1 = ring[i][0], ring[i][1]
+        x2, y2 = ring[i + 1][0], ring[i + 1][1]
+        if (y1 > lat) != (y2 > lat):
+            x_at = (x2 - x1) * (lat - y1) / (y2 - y1) + x1
+            if lon < x_at:
+                inside = not inside
+    return inside
+
+
+def rule_resolution_correct(feature: Feature, schema: dict) -> bool:
+    """Resolution must equal 8 when present.
+
+    Absence is tolerated: the reference file carries no ``resolution`` property
+    at all (docs/discrepancies.md E2), so requiring it would penalise the
+    reference for a difference we already know about and have documented.
+    """
+    props = _props(feature)
+    if "resolution" not in props:
+        return True
+    return props["resolution"] == schema["properties"]["resolution"]["equals"]
+
+
+RULES: dict[str, RuleFn] = {
+    "index_present": rule_index_present,
+    "index_pattern": rule_index_pattern,
+    "geometry_type": rule_geometry_type,
+    "geometry_positions": rule_geometry_positions,
+    "geometry_closed": rule_geometry_closed,
+    "coordinates_in_bounds": rule_coordinates_in_bounds,
+    "centroid_present": rule_centroid_present,
+    "centroid_in_bounds": rule_centroid_in_bounds,
+    "centroid_within_polygon": rule_centroid_within_polygon,
+    "resolution_correct": rule_resolution_correct,
+}
+
+
+def score_conformance(features: list[Feature], schema: dict) -> dict[str, Any]:
+    """Score a feature collection against the schema contract."""
+    if not features:
+        return {
+            "score": 0.0, "verdict": "fail", "n_features": 0,
+            "rule_scores": {}, "failures": {},
+            "detail": "no features to score",
+        }
+
+    scoring = schema["scoring"]
+    weights = scoring["weights"]
+    max_examples = scoring.get("max_examples_per_rule", 5)
+
+    rule_scores: dict[str, float] = {}
+    failures: dict[str, list[str]] = {}
+
+    for name, rule in RULES.items():
+        failing = [f for f in features if not rule(f, schema)]
+        rule_scores[name] = (len(features) - len(failing)) / len(features)
+        if failing:
+            failures[name] = [
+                str(_props(f).get("index", "<no index>")) for f in failing[:max_examples]
+            ]
+
+    # Uniqueness is collection-level, not per-feature, so it is scored separately
+    # as the fraction of features carrying a non-duplicated index.
+    indices = [_props(f).get("index") for f in features]
+    unique_count = sum(1 for i in indices if indices.count(i) == 1) if len(indices) < 5000 else None
+    if unique_count is None:
+        seen: dict[Any, int] = {}
+        for i in indices:
+            seen[i] = seen.get(i, 0) + 1
+        unique_count = sum(1 for i in indices if seen[i] == 1)
+    rule_scores["index_unique"] = unique_count / len(features)
+
+    # geometry_valid: a closed, correctly-sized, single ring within bounds.
+    rule_scores["geometry_valid"] = min(
+        rule_scores["geometry_type"],
+        rule_scores["geometry_positions"],
+        rule_scores["geometry_closed"],
+    )
+
+    total_weight = sum(weights.get(name, 0.0) for name in rule_scores)
+    if total_weight == 0:
+        raise ValueError("Schema defines no weights for any active rule")
+    score = sum(
+        rule_scores[name] * weights.get(name, 0.0) for name in rule_scores
+    ) / total_weight
+
+    thresholds = scoring["thresholds"]
+    if score >= thresholds["pass"]:
+        verdict = "pass"
+    elif score >= thresholds["warn"]:
+        verdict = "warn"
+    else:
+        verdict = "fail"
+
+    # Collection-level bounds are reported but do not enter the weighted score --
+    # they are an order-of-magnitude sanity check, not a quality measure.
+    collection = schema["collection"]
+    count_ok = collection["min_features"] <= len(features) <= collection["max_features"]
+
+    return {
+        "score": round(score, 6),
+        "verdict": verdict,
+        "n_features": len(features),
+        "feature_count_in_expected_range": count_ok,
+        "rule_scores": {k: round(v, 6) for k, v in sorted(rule_scores.items())},
+        "failures": failures,
+    }
+
+
+def log_conformance(report: dict[str, Any], schema: dict) -> None:
+    """Log a conformance report at a level matching its verdict."""
+    thresholds = schema["scoring"]["thresholds"]
+    verdict = report["verdict"]
+    level = {"pass": logging.INFO, "warn": logging.WARNING}.get(verdict, logging.ERROR)
+
+    logger.log(
+        level,
+        "Schema conformance: %.6f (%s) over %d features [pass>=%.2f warn>=%.2f]",
+        report["score"], verdict.upper(), report["n_features"],
+        thresholds["pass"], thresholds["warn"],
+    )
+
+    # Any imperfect rule is always surfaced, whatever the aggregate -- an
+    # aggregate can hide a small systematic fault behind many passing features.
+    for name, value in report["rule_scores"].items():
+        if value < 1.0:
+            examples = ", ".join(report["failures"].get(name, [])) or "n/a"
+            logger.log(level, "  rule %-26s %.6f  e.g. %s", name, value, examples)
+
+    if not report["feature_count_in_expected_range"]:
+        logger.warning(
+            "  feature count %d is outside the expected range in the schema",
+            report["n_features"],
+        )
+
+
+def compare_to_reference(
+    extracted: list[Feature],
+    reference: list[Feature],
+    schema: dict,
+) -> dict[str, Any]:
+    """Compare extracted features against the reference file.
+
+    Comparison runs on the intersection of properties only. The extraction
+    source carries a ``resolution`` property that the reference lacks
+    (docs/discrepancies.md E2), so a whole-record equality check would report a
+    total mismatch on a perfectly correct extraction.
+    """
+    cfg = schema["comparison"]
+    key = cfg["key"]
+    compare_props = cfg["compare_properties"]
+    tolerance = float(cfg["coordinate_tolerance_deg"])
+
+    def index_of(features: list[Feature]) -> dict[str, Feature]:
+        return {_props(f).get(key): f for f in features}
+
+    got, want = index_of(extracted), index_of(reference)
+    got_keys, want_keys = set(got), set(want)
+
+    missing = sorted(want_keys - got_keys)
+    extra = sorted(got_keys - want_keys)
+    common = want_keys & got_keys
+
+    property_mismatches: list[str] = []
+    geometry_mismatches: list[str] = []
+    exact_geometry_matches = 0
+
+    for k in common:
+        gp, wp = _props(got[k]), _props(want[k])
+        for prop in compare_props:
+            a, b = gp.get(prop), wp.get(prop)
+            if isinstance(a, float) and isinstance(b, float):
+                if abs(a - b) > tolerance:
+                    property_mismatches.append(k)
+                    break
+            elif a != b:
+                property_mismatches.append(k)
+                break
+
+        if cfg.get("compare_geometry"):
+            ga, gb = _ring(got[k]), _ring(want[k])
+            if ga == gb:
+                exact_geometry_matches += 1
+            elif len(ga) != len(gb) or any(
+                abs(p[0] - q[0]) > tolerance or abs(p[1] - q[1]) > tolerance
+                for p, q in zip(ga, gb)
+            ):
+                geometry_mismatches.append(k)
+
+    passed = not missing and not extra and not property_mismatches and not geometry_mismatches
+
+    return {
+        "passed": passed,
+        "n_extracted": len(extracted),
+        "n_reference": len(reference),
+        "n_common": len(common),
+        "n_missing_from_extraction": len(missing),
+        "n_extra_in_extraction": len(extra),
+        "n_property_mismatches": len(property_mismatches),
+        "n_geometry_mismatches": len(geometry_mismatches),
+        "n_geometry_exact_matches": exact_geometry_matches,
+        "examples": {
+            "missing": missing[:5],
+            "extra": extra[:5],
+            "property_mismatches": property_mismatches[:5],
+            "geometry_mismatches": geometry_mismatches[:5],
+        },
+    }
