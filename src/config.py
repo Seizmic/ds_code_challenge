@@ -24,6 +24,7 @@ PROCESSED_DIR = DATA_DIR / "processed"
 QUALITY_DIR = DATA_DIR / "quality"
 
 HEX_SCHEMA_PATH = CONFIG_DIR / "hex_schema.yaml"
+SR_SCHEMA_PATH = CONFIG_DIR / "sr_schema.yaml"
 RUN_MANIFEST_PATH = QUALITY_DIR / "run_manifest.json"
 
 # --- S3 ----------------------------------------------------------------------
@@ -72,6 +73,22 @@ CCT_BOUNDS = {
     "lat_max": -33.40,
 }
 
+# Which method produces the published h3_level8_index.
+#
+#   "geometric" -- spatial join against city-hex-polygons-8.geojson. This is
+#                  what Section 2 literally asks for, and the only route that
+#                  can surface coverage gaps in the supplied polygons.
+#   "library"   -- h3.latlng_to_cell directly.
+#
+# Measured on the full dataset, geometric reaches 99.99692% exact agreement
+# with sr_hex.csv.gz and library reaches 100%: all 29 differences resolve in
+# the library's favour, which is evidence sr_hex was generated with the library
+# rather than a geometric join. Geometric is kept as the default anyway,
+# because matching the reference by switching to the method that produced it
+# would demonstrate nothing about the polygons. The 29 are documented instead.
+JOIN_METHOD = "geometric"
+JOIN_METHODS = ("geometric", "library")
+
 # Sentinel for records with no geolocation, mandated by the challenge spec.
 # NOTE: emitted as a *string*, because the surrounding column holds 15-character
 # H3 index strings and a mixed-type column coerces unpredictably. Confirmed
@@ -101,6 +118,12 @@ def load_hex_schema() -> dict[str, Any]:
     desired schema in "a standalone configuration or documentation file".
     """
     with HEX_SCHEMA_PATH.open("r", encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def load_sr_schema() -> dict[str, Any]:
+    """Load the service request data contract."""
+    with SR_SCHEMA_PATH.open("r", encoding="utf-8") as handle:
         return yaml.safe_load(handle)
 
 

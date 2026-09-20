@@ -1,0 +1,193 @@
+# =============================================================================
+# Data contract for the service request dataset
+# =============================================================================
+# The hexagon side had a schema contract from the start; the service request
+# side did not, which left the pipeline trusting 941,634 rows of input it never
+# checked. This file closes that gap.
+#
+# The point is NOT that the supplied data is dirty -- it measurably is not. The
+# point is that the pipeline must FAIL LOUDLY rather than degrade silently when
+# pointed at a source that is. Every rule below is something that, left
+# unchecked, would produce a plausible-looking but wrong result.
+#
+# Scored the same way as config/hex_schema.yaml: each rule contributes the
+# fraction of rows satisfying it, aggregated as a weighted mean against
+# pass/warn/fail bands.
+# =============================================================================
+
+dataset:
+  name: service_requests
+  description: >
+    Twelve months of City of Cape Town service requests, one row per request.
+
+# -----------------------------------------------------------------------------
+# Structural contract -- checked BEFORE any row-level rule
+# -----------------------------------------------------------------------------
+# A structural failure is fatal and not scored: if the columns are not what we
+# expect, every row-level score below is measuring the wrong thing.
+structure:
+  required_columns:
+    - notification_number
+    - reference_number
+    - creation_timestamp
+    - completion_timestamp
+    - directorate
+    - department
+    - branch
+    - section
+    - code_group
+    - code
+    - cause_code_group
+    - cause_code
+    - official_suburb
+    - latitude
+    - longitude
+  # Extra columns are tolerated; missing ones are not.
+  allow_extra_columns: true
+  # Guards against a catastrophically truncated or empty input.
+  min_rows: 1000
+
+# -----------------------------------------------------------------------------
+# Row-level rules
+# -----------------------------------------------------------------------------
+# Every `max_null_fraction` below is calibrated against the MEASURED rate in the
+# supplied data (stated per column), with headroom, rather than guessed. Two of
+# these were originally set by intuition and both were wrong -- reference_number
+# is 37% blank, not the 5% assumed. A ceiling pulled from thin air either fails
+# constantly on healthy data or never fires at all; neither is a check.
+#
+# Headroom is roughly 1.5x the observed baseline, so the ceiling catches a
+# material regression without tripping on ordinary variation.
+columns:
+  notification_number:
+    required: true
+    # Leading zeros are significant (see discrepancies.md E4): read as string.
+    dtype: string
+    pattern: '^[0-9]{6,15}$'
+    unique: true
+    max_null_fraction: 0.0    # observed 0.0000 -- an absent id is unrecoverable
+
+  reference_number:
+    required: true
+    dtype: string
+    max_null_fraction: 0.50   # observed 0.3703
+
+  creation_timestamp:
+    required: true
+    dtype: datetime
+    max_null_fraction: 0.0    # observed 0.0000
+    # Deliberately wide. This catches a parsing or epoch fault, not a
+    # business-rule violation about which years are in scope.
+    min: "2000-01-01"
+    max: "2100-01-01"
+
+  completion_timestamp:
+    required: true
+    dtype: datetime
+    # Open requests legitimately have no completion time.
+    max_null_fraction: 1.0    # observed 0.0129 -- open requests have none
+    min: "2000-01-01"
+    max: "2100-01-01"
+
+  directorate:
+    required: true
+    dtype: string
+    max_null_fraction: 0.05   # observed 0.0100
+
+  department:
+    required: true
+    dtype: string
+    max_null_fraction: 0.05   # observed 0.0100
+
+  official_suburb:
+    required: true
+    dtype: string
+    # Blank suburbs do occur legitimately in the supplied data.
+    max_null_fraction: 0.35   # observed 0.2256
+
+  latitude:
+    required: true
+    dtype: float_or_blank
+    min: -34.40
+    max: -33.40
+
+  longitude:
+    required: true
+    dtype: float_or_blank
+    min: 18.20
+    max: 19.10
+
+# -----------------------------------------------------------------------------
+# Cross-column consistency
+# -----------------------------------------------------------------------------
+# The rules a single-column check cannot express. These are the ones that catch
+# a source which is individually well-formed but internally incoherent.
+consistency:
+  coordinate_pair_completeness:
+    description: >
+      latitude and longitude must be BOTH present or BOTH absent. Exactly one
+      present is inconsistent, and would otherwise be silently assigned the
+      no-geolocation sentinel, hiding the fault inside an expected count.
+    max_violation_fraction: 0.0
+
+  completion_after_creation:
+    description: >
+      A request cannot be completed before it was created. Split by magnitude,
+      because the two causes are entirely different problems.
+
+      Measured on the supplied data: 5,483 rows (0.58%) complete before they
+      are created, but EVERY one is sub-hour -- median -4 seconds, worst -15
+      minutes. That signature is clock skew between the system recording
+      creation and the one recording completion, not a logical fault. Failing
+      the pipeline on it would be crying wolf on an operational reality.
+
+      A gross inversion is different in kind: hours or days backwards means
+      swapped columns, a timezone fault, or a corrupt export, and no amount of
+      clock drift explains it. That gets a limit of zero.
+    clock_skew_tolerance_seconds: 3600
+    max_minor_violation_fraction: 0.02   # ~3x the observed 0.58% baseline
+    max_gross_violation_fraction: 0.0
+
+  duplicate_notification_number:
+    description: >
+      The identifier must be unique. Duplicates inflate every downstream count
+      and silently break the validation join.
+    max_violation_fraction: 0.0
+
+# -----------------------------------------------------------------------------
+# Scoring
+# -----------------------------------------------------------------------------
+scoring:
+  weights:
+    # Identity and structure -- a failure invalidates downstream joins.
+    notification_number_present: 3.0
+    notification_number_pattern: 2.0
+    notification_number_unique: 3.0
+
+    # Spatial -- drives the entire Section 2 output.
+    latitude_in_range: 3.0
+    longitude_in_range: 3.0
+    coordinate_pair_completeness: 3.0
+
+    # Temporal.
+    creation_timestamp_parseable: 2.0
+    creation_timestamp_in_range: 1.0
+    completion_after_creation: 1.0
+    completion_after_creation_gross: 3.0
+
+    # Categorical completeness -- lower weight: these degrade analysis rather
+    # than breaking the pipeline.
+    directorate_populated: 1.0
+    department_populated: 1.0
+    official_suburb_populated: 0.5
+
+  thresholds:
+    # Lower than the hexagon contract's 0.99. These are human- and
+    # system-entered operational records, not machine-generated geometry, so a
+    # small rate of imperfection is normal and failing on it would be crying
+    # wolf. The bands still make degradation visible long before it is fatal.
+    pass: 0.98
+    warn: 0.90
+
+  report_failing_rules: true
+  max_examples_per_rule: 5

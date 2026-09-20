@@ -52,6 +52,25 @@ class TestClassification:
         df = pd.DataFrame({"latitude": ["not-a-number"], "longitude": ["18.4"]})
         assert classify_coordinates(df).iloc[0] == CoordClass.UNPARSEABLE
 
+    def test_half_populated_coordinates_are_not_treated_as_missing(self):
+        """One ordinate present, the other absent, is inconsistent -- not absent.
+
+        The original rule used OR across the two columns, so a record with a
+        latitude but no longitude was classed as MISSING, handed index 0, and
+        counted as a legitimate no-geolocation record. The fault vanished into
+        an expected total. This dataset contains none, but a dirtier source
+        would have degraded silently.
+        """
+        lat_only = pd.DataFrame({"latitude": ["-33.9249"], "longitude": [""]})
+        lon_only = pd.DataFrame({"latitude": [""], "longitude": ["18.4241"]})
+
+        assert classify_coordinates(lat_only).iloc[0] == CoordClass.PARTIAL
+        assert classify_coordinates(lon_only).iloc[0] == CoordClass.PARTIAL
+
+    def test_both_absent_is_missing(self):
+        both = pd.DataFrame({"latitude": [""], "longitude": [""]})
+        assert classify_coordinates(both).iloc[0] == CoordClass.MISSING
+
     def test_out_of_bounds_coordinates(self):
         """Johannesburg: valid coordinates, wrong city."""
         result = classify_coordinates(frame([(-26.2041, 28.0473)]))

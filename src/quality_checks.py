@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 class CoordClass(StrEnum):
     """Mutually exclusive classification of a record's coordinates."""
 
-    MISSING = "missing"            # no coordinates -> index 0 per the spec (R0)
+    MISSING = "missing"            # BOTH absent -> index 0 per the spec (R0)
+    PARTIAL = "partial"            # exactly one of lat/lon present -- inconsistent
     VALID = "valid"                # parseable and inside the CoCT bounding box
     INVERTED = "inverted"          # latitude and longitude appear swapped
     NULL_ISLAND = "null_island"    # exactly (0, 0) -- a classic geocoding failure
@@ -52,7 +53,16 @@ def classify_coordinates(
 
     # Treat common textual null spellings as missing, not as unparseable.
     null_tokens = {"", "nan", "none", "null", "na", "n/a"}
-    missing = raw_lat.str.lower().isin(null_tokens) | raw_lon.str.lower().isin(null_tokens)
+    lat_null = raw_lat.str.lower().isin(null_tokens)
+    lon_null = raw_lon.str.lower().isin(null_tokens)
+
+    # BOTH must be absent to count as legitimately missing. A record with one
+    # ordinate present and the other absent is internally inconsistent, not
+    # ungeolocated: treating it as missing would hand it index 0 and bury a
+    # real data fault inside the expected no-geolocation count. This dataset
+    # happens to contain none, but a dirtier source would silently degrade.
+    missing = lat_null & lon_null
+    partial = lat_null ^ lon_null
 
     lat = pd.to_numeric(raw_lat, errors="coerce")
     lon = pd.to_numeric(raw_lon, errors="coerce")
@@ -75,6 +85,7 @@ def classify_coordinates(
     result[inverted] = CoordClass.INVERTED
     result[null_island] = CoordClass.NULL_ISLAND
     result[unparseable] = CoordClass.UNPARSEABLE
+    result[partial] = CoordClass.PARTIAL
     result[missing] = CoordClass.MISSING
 
     return result
@@ -97,7 +108,8 @@ def log_summary(summary: dict[str, int], total: int) -> None:
             continue
         logger.info("  %-14s %9d  (%5.2f%%)", name, count, 100.0 * count / total)
 
-    for name in (CoordClass.INVERTED, CoordClass.NULL_ISLAND, CoordClass.UNPARSEABLE):
+    for name in (CoordClass.INVERTED, CoordClass.NULL_ISLAND,
+                 CoordClass.UNPARSEABLE, CoordClass.PARTIAL):
         if summary.get(str(name), 0):
             logger.warning(
                 "  %d record(s) classified as %s -- these are excluded from the "

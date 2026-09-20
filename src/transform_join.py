@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import Polygon
 
-from src import config, quality_checks
+from src import config, quality_checks, sr_validation
 from src.logging_setup import MANIFEST, timed
 from src.quality_checks import CoordClass
 
@@ -438,6 +438,22 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
         df = load_service_requests(client)
     logger.info("Loaded %d service requests", len(df))
 
+    # --- Data contract -------------------------------------------------------
+    # Runs before anything else touches the data. Structural failure is fatal:
+    # if the columns are not what we expect, every later measurement is of the
+    # wrong thing.
+    with timed("section2.sr_data_contract", logger):
+        sr_schema = config.load_sr_schema()
+        contract = sr_validation.score(df, sr_schema)
+    sr_validation.log_report(contract, sr_schema)
+    MANIFEST.record_metric("section2.sr_data_contract", contract)
+    MANIFEST.record_verdict(
+        "section2.sr_data_contract",
+        contract["verdict"] != "fail" and not contract["consistency_violations"],
+        f"score={contract['score']} verdict={contract['verdict']}",
+    )
+    sr_validation.enforce(contract, sr_schema)
+
     # --- Quality gate --------------------------------------------------------
     with timed("section2.coordinate_classification", logger):
         coord_class = quality_checks.classify_coordinates(df)
@@ -496,15 +512,26 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
     # --- Broadcast back to every row ----------------------------------------
     with timed("section2.broadcast_to_rows", logger):
         merged = points.merge(
-            unique[["latitude", "longitude", "h3_geometric", "rule"]],
+            unique[["latitude", "longitude", "h3_geometric", "h3_library", "rule"]],
             on=["latitude", "longitude"], how="left",
         )
         merged.index = points.index
 
+        if config.JOIN_METHOD not in config.JOIN_METHODS:
+            raise ValueError(
+                f"config.JOIN_METHOD={config.JOIN_METHOD!r} is not one of "
+                f"{config.JOIN_METHODS}"
+            )
+        published = (
+            "h3_geometric" if config.JOIN_METHOD == "geometric" else "h3_library"
+        )
+        logger.info("Publishing the %s assignment (config.JOIN_METHOD=%r)",
+                    published, config.JOIN_METHOD)
+
         result = pd.DataFrame(index=df.index)
         result["h3_level8_index"] = config.NO_GEOLOCATION_INDEX
         result["rule"] = RULE_R0_NO_GEOLOCATION
-        result.loc[joinable, "h3_level8_index"] = merged["h3_geometric"].to_numpy()
+        result.loc[joinable, "h3_level8_index"] = merged[published].to_numpy()
         result.loc[joinable, "rule"] = merged["rule"].to_numpy()
 
         # Invalid coordinates are marked distinctly so they cannot hide inside

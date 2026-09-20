@@ -31,6 +31,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "Transfers 108 MB; off by default.",
     )
     parser.add_argument(
+        "--join-method", choices=list(config.JOIN_METHODS), default=None,
+        help="Which assignment to publish. Default comes from "
+             "config.JOIN_METHOD (currently %(default)s -> geometric).",
+    )
+    parser.add_argument(
         "--verbose", "-v", action="store_true", help="Enable debug logging.",
     )
     return parser.parse_args(argv)
@@ -40,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(logging.DEBUG if args.verbose else logging.INFO)
     config.ensure_directories()
+    if args.join_method:
+        config.JOIN_METHOD = args.join_method
 
     logger.info("=" * 78)
     logger.info("City of Cape Town DS code challenge -- Sections 1 and 2")
