@@ -9,8 +9,8 @@ ds_code_challenge_creds.json
 
 # --- Data ---
 # Inputs are downloaded at runtime and cached; outputs are regenerated.
-data/
-!data/.gitkeep
+data/**
+!data/**/
 !data/**/.gitkeep
 *.csv.gz
 *.geojson
