@@ -118,7 +118,7 @@ Four independent angles, strongest first:
    - `provided - required` = cells outside the boundary, which are expected at the edge since hexagons straddle it
 2. **Empirical.** Any SR with valid, in-bounds coordinates that fails to match a hexagon is direct evidence of a gap. Map the failures: genuine gaps cluster spatially, whereas random scatter points to a different cause.
 3. **Topological.** Union the hexagons and inspect the interior for holes.
-4. **Order-of-magnitude sanity.** H3 resolution-8 cells average approximately 0.737 km squared; CoCT covers approximately 2,446 km squared, implying roughly **3,300 cells** plus an edge margin. The 1.97 MB file size is broadly consistent with that count. *This is an a-priori estimate to be confirmed, not a measurement.*
+4. **Order-of-magnitude sanity.** ~~H3 resolution-8 cells average approximately 0.737 km squared; CoCT covers approximately 2,446 km squared, implying roughly 3,300 cells.~~ **Corrected 2026-09-20 after measurement — see section F2.** The 0.737 figure is H3's *global* mean; the cells over Cape Town measure **0.697990 km squared**. With CoCT at 2,445 km squared that predicts ~3,503 cells against **3,832 actual**, the ~9% excess being cells straddling the municipal boundary.
 
 Dependency and risk: angle (1) needs the boundary from the CoCT open-data portal, whose reliability the upstream README itself warns about. Mitigation: retry with backoff, and cache the boundary into the repo as a fallback so the pipeline still runs end to end.
 
@@ -214,3 +214,51 @@ of Section 1 failure is comfortably avoided.
   column as `str` and inspecting values whose length is not 15.
 - **D2** - per-row coordinate classification across the full SR dataset.
 - **D4** - coverage of the CoCT boundary.
+
+---
+
+## F. Assumption audit (2026-09-20)
+
+Every figure asserted from general knowledge rather than measured was re-checked
+against the data. Recorded because an unvalidated constant that happens to be
+close enough is indistinguishable from a correct one until it is not.
+
+| # | Claim as originally stated | Verified value | Verdict |
+|---|---|---|---|
+| F1 | Cape Town bbox: lon 18.20-19.10, lat -34.40 to -33.40 | Supplied hexagons span lon 18.2979-19.0126, lat -34.3649 to -33.4640 | **Correct.** Contains the City's own extent with 0.035-0.098 deg margin on every side. Kept deliberately loose - see F3. |
+| F2 | H3 res-8 cells average ~0.737 km squared | **0.697990 km squared** measured across the 3,832 cells (range 0.6910-0.7030) | **WRONG by 5.3%.** See below. |
+| F3 | CoCT area ~2,446 km squared | 2,445 km squared | Correct to within 1 km squared. Corrected for accuracy. |
+| F4 | ~3,300 hexagons expected | **3,832** actual | **Underestimate by 13.9%**, a direct consequence of F2. Recomputed: 2,445 / 0.69799 = ~3,503, the remaining ~9% being cells straddling the boundary. |
+| F5 | Res-8 H3 indices match `^88[0-9a-f]{8}fffff$` | 3,832 / 3,832 match; all resolution 8 | **Verified.** |
+| F6 | "Pentagons exist in the H3 grid but none fall near Cape Town" | 0 pentagons; all 3,832 cells have exactly 7 ring positions | **Verified.** |
+| F7 | Cape Town to Johannesburg ~1,260 km (test constant) | 1,261.6 km | **Verified.** |
+| F8 | Clock skew: 5,483 rows, median -4s, worst -15 min, all sub-hour | 5,483 (0.5823%), median 4s, worst 15m41s, all under 1 hour | **Verified exactly.** |
+| F9 | Minor-inversion limit is "~3x the observed baseline" | 0.02 / 0.005823 = **3.43x** | Restated precisely. |
+| F10 | Coordinate de-duplication would be "the single largest algorithmic win" | 460,413 unique of 729,270 rows = **1.58x** | **Overstated.** Real, but modest; the headline saving is Section 1's 98.2% transfer reduction. Corrected in README. |
+
+### F2 in detail - the one that was actually wrong
+
+The widely-quoted 0.737 km squared for H3 resolution 8 is the **global mean**. H3
+cells are projected onto an icosahedron, so area varies with position: at Cape
+Town's location the cells measure **0.697990 km squared**, 5.3% smaller.
+
+Consequence: the a-priori estimate of ~3,300 cells was 13.9% low against the 3,832
+actual. It was reported at the time as "an estimate to be confirmed, not a
+measurement", so nothing downstream depended on it - the schema's `min_features`
+/ `max_features` band of 2,500-5,000 contains the true value comfortably. But it
+was quoted three times across the documentation as though it were a fact, and a
+reader would reasonably have taken it as one.
+
+**Lesson applied:** the published constant for a spatial system is a global
+average, not a local one. `h3.cell_area()` on the actual cells costs
+milliseconds and is exact.
+
+### F3 - why the bounding box is not tightened to the measured extent
+
+It would be tempting to narrow `CCT_BOUNDS` to the hexagons' measured span. That
+would be wrong. The bbox classifies coordinates *before* the join; a point just
+beyond hexagon coverage must be classed `VALID` and then fail the join as `R4`,
+which surfaces it as a **coverage finding**. Tightening the box would reclassify
+it as `OUT_OF_BOUNDS` and silently discard exactly the signal worth having.
+
+Three real records do precisely this - see the `C2b_outside_coverage` category.

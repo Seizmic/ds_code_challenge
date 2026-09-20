@@ -65,7 +65,17 @@ S3_SELECT_EXPRESSION = (
 # Bounding box for the City of Cape Town, used to classify coordinates and to
 # detect axis inversion. Latitude and longitude ranges here are disjoint and
 # opposite in sign, which is what makes inversion trivially detectable.
-# Deliberately loose -- this is a sanity gate, not a precise boundary.
+#
+# Originally set from general knowledge, then VALIDATED against the supplied
+# polygons (2026-09-20). The 3,832 hexagons span lon 18.2979-19.0126 and lat
+# -34.3649 to -33.4640, so these bounds contain the City's own definition of
+# its extent with 0.035-0.098 degrees of margin on every side.
+#
+# Deliberately kept loose rather than tightened to the measured extent: this is
+# a sanity gate for detecting inversion and gross error, and a point just
+# outside hexagon coverage should be classed VALID and then fail the join as
+# R4 (a coverage finding) rather than be dismissed as out-of-bounds. Three real
+# records do exactly that -- see docs/discrepancies.md F3.
 CCT_BOUNDS = {
     "lon_min": 18.20,
     "lon_max": 19.10,

@@ -145,7 +145,7 @@ consistency:
       swapped columns, a timezone fault, or a corrupt export, and no amount of
       clock drift explains it. That gets a limit of zero.
     clock_skew_tolerance_seconds: 3600
-    max_minor_violation_fraction: 0.02   # ~3x the observed 0.58% baseline
+    max_minor_violation_fraction: 0.02   # 3.43x the measured 0.5823% baseline
     max_gross_violation_fraction: 0.0
 
   duplicate_notification_number:

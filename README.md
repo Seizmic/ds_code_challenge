@@ -120,7 +120,7 @@ measures:
 |---|---|
 | Server-side filtering via S3 Select | Avoids transferring 108 MB to extract ~2 MB |
 | Streaming the S3 Select event stream | Bounded memory; avoids buffering the full payload |
-| Coordinate de-duplication before the spatial join | Service requests cluster heavily on repeated address and block centroids. Joining only *unique* coordinate pairs and broadcasting the result back is expected to be the single largest algorithmic win. Measured and reported. |
+| Coordinate de-duplication before the spatial join | Joins only *unique* coordinate pairs, then broadcasts back. **Measured: 460,413 unique pairs from 729,270 rows — 1.58x less join work.** Worth keeping, but a smaller win than anticipated; the headline saving is Section 1's transfer reduction, not this. |
 | Vectorised spatial predicates (shapely 2.x STRtree, built once) | Avoids per-row Python iteration |
 | Column pruning and explicit dtypes when reading the SR data | Reduces parse time and memory |
 | ETag-keyed on-disk caching | Inputs are static since 2021/2022, so reruns skip the network entirely |

@@ -5,138 +5,203 @@ work that you asked AI assistance to undertake, including any prompts, the model
 number of tokens") and by the assessment brief.
 
 **Tool:** Claude Code (Anthropic), model `claude-opus-5`
-**Usage posture:** AI used for documentation drafting, requirements auditing and design
-critique. All findings that depend on the actual datasets are marked as *unverified* until
-executed and checked by hand.
+**Usage:** heavy. The AI drafted the documentation, wrote the pipeline code and the tests, and
+ran the analysis. It was directed and audited throughout rather than accepted as delivered; the
+two corrections in the section below are the substantive examples of that.
 
 ---
 
 ## Token accounting
 
-Token counts are reported per session. Figures are taken from the client's own usage reporting
-where available and are otherwise estimates, flagged as such.
-
 | # | Date | Session | Approx. tokens (in / out) |
 |---|---|---|---|
-| 1 | 2026-09-20 | Requirements audit and documentation scaffold | ~90k / ~13k *(estimated)* |
-| 2 | 2026-09-20 | Environment audit, `gh` install, decisions folded into docs | ~35k / ~6k *(estimated)* |
+| 1 | 2026-09-20 | Requirements audit and documentation scaffold | ~90k / ~13k |
+| 2 | 2026-09-20 | Environment audit, `gh` install, decisions folded into docs | ~35k / ~6k |
+| 3 | 2026-09-20 | Fork, Section 1, Section 2, tests | ~210k / ~48k |
+| 4 | 2026-09-20 | Data quality contract and assumption audit | ~95k / ~22k |
+| | | **Total** | **~430k / ~89k** |
 
-*Running total will be updated per session. Session 1 figures are an estimate derived from
-context size rather than an exact client-reported count; later entries will use exact figures
-where the client exposes them.*
-
----
-
-## Session 1 - 2026-09-20 - Requirements audit and documentation scaffold
-
-### What was asked
-
-A single briefing covering: review the emailed challenge requirements against the upstream
-GitHub documentation and report discrepancies (with the brief overriding GitHub where they
-conflict); identify where the calculations need optimising; propose a rule for service requests
-falling at the intersection of two or more polygons so they do not produce multiple results;
-assess whether the City of Cape Town has full coverage from the supplied polygons; look for
-coordinate inversion and general data-quality issues; verify that `sr_hex_truncated.csv` is
-genuinely a truncation of `sr_hex.csv` and contains no orphan records; and return a plan.
-Explicit constraints: **write no pipeline code and retrieve no datasets**, but begin drafting
-`README.md` and `AI_log.md`.
-
-### What the AI actually did
-
-- Fetched and read the upstream `README.md` in full.
-- Queried the GitHub API for repository metadata, branches, commit history and issues.
-- Ran **HEAD-only** HTTP requests against the six S3 objects to confirm availability and
-  sizes. No object bodies were downloaded, honouring the "do not retrieve the datasets"
-  constraint.
-- Researched the current status of the AWS S3 Select API.
-- Drafted `README.md`, `AI_log.md`, `docs/discrepancies.md` and `docs/decisions.md`.
-
-### Human review still outstanding
-
-- [ ] Verify the Cape Town bounding-box figures in `docs/discrepancies.md` D2 against an
-      authoritative source. They were produced from the model's general knowledge and are
-      currently marked approximate.
-- [ ] Verify the ~0.737 km squared H3 resolution-8 average cell area and the ~2,446 km squared
-      CoCT area used in the D4 coverage estimate.
-- [ ] Confirm the S3 Select deprecation claim (B1) against current AWS documentation before
-      relying on it in the submission.
-- [ ] Replace the estimated token figures above with exact counts.
+Figures are estimated from context size rather than exact client-reported counts.
 
 ---
 
-## Session 2 - 2026-09-20 - Environment audit and decisions
+## Session log
 
-### What was asked
+### Session 1 - Requirements audit and documentation scaffold
 
-Four design decisions were given (descope the truncated-file check; run both join methods over
-the full dataset and categorise the disagreements; report coverage gaps rather than failing on
-them; the AI-correction example is the candidate's to write). Then: could the GitHub CLI be
+**Asked for:** review the emailed brief against the upstream GitHub documentation and report
+discrepancies, with the brief overriding GitHub where they conflict; identify where the
+calculations need optimising; propose a rule for service requests falling at the intersection
+of two or more polygons; assess whether the City has full polygon coverage; look for coordinate
+inversion and general data-quality issues; verify `sr_hex_truncated.csv` against `sr_hex.csv`;
+return a plan. Constraints: no pipeline code, no dataset downloads.
+
+**Did:** read the upstream README in full; queried the GitHub API for branches, commits and
+issues; ran HEAD-only requests against the six S3 objects to confirm availability and sizes
+without downloading them; researched the status of the AWS S3 Select API; drafted `README.md`,
+`AI_log.md`, `docs/discrepancies.md` and `docs/decisions.md`.
+
+### Session 2 - Environment and decisions
+
+**Asked for:** four design decisions (descope the truncated-file check; run both join methods
+over the full dataset and categorise disagreements; report coverage gaps rather than failing on
+them; the AI-correction example is the candidate's to write). Then: can the GitHub CLI be
 installed, and what would make setup easier?
 
-### What the AI actually did
+**Did:** audited installed tooling, git configuration and disk space; verified cp314 wheel
+availability across the geospatial stack on PyPI; installed GitHub CLI 2.101.0. Did **not**
+authenticate it - that requires the candidate's own credentials. Wrote `docs/environment.md`.
 
-- Audited installed tooling, git configuration and free disk space.
-- Queried the PyPI API for cp314 wheel availability across the geospatial stack, prompted by
-  Python 3.14.3 being new enough that wheel lag was a plausible blocker.
-- Installed GitHub CLI 2.101.0 via `winget` at user scope. **Did not** authenticate it -
-  that requires the candidate's own credentials.
-- Recorded the decisions in `docs/decisions.md`, added the disagreement-category design, and
-  wrote `docs/environment.md`.
+**Found:** git identity was unset, which would have produced commits unattributable to the
+candidate's GitHub profile on a fork whose commit history is assessed.
 
-### Human review still outstanding
+### Session 3 - Sections 1 and 2
 
-- [ ] Re-confirm the cp314 wheel availability at implementation time; PyPI state can move.
+**Asked for:** fork the repository and implement Sections 1 and 2, with tests written alongside
+Section 2 rather than afterwards.
+
+**Did:** forked and cloned; implemented S3 Select extraction with non-binary conformance
+scoring; implemented the R0-R4 assignment rule, coordinate quality gate, dual-method comparison
+and reference validation; wrote 30 tests.
+
+**Results:** Section 1 - conformance 1.000000, all 3,832 features byte-identical to the
+reference, 98.2% transfer reduction, 4.2x faster than a naive download. Section 2 - 99.996920%
+exact agreement with `sr_hex.csv.gz`.
+
+### Session 4 - Data quality contract and assumption audit
+
+**Asked for:** "I asked for data quality checks which would include consistency. Even though the
+data we are working with may be clean, if the system is used with other data that is not 100%
+clean, this may produce errors. What data quality metrics have you put in place and if none,
+why not?" Then: re-check and validate everything that had been guessed or assumed.
+
+**Did:** audited existing coverage, built `config/sr_schema.yaml` and `src/sr_validation.py`,
+fixed a consistency bug, calibrated every threshold against measurement, and re-validated ten
+asserted constants. See corrections 2 and 3.
 
 ---
 
 ## Corrections and improvements
 
-The brief requires at least one documented instance where AI output was corrected.
+The brief requires at least one documented instance where AI output was corrected. There are
+four below. The two substantive ones (2 and 3) were **driven by the candidate's questions**,
+not caught by the AI on its own.
 
-### 1. AI self-correction during session 1 - summarised source mistaken for verbatim
+### 1. AI self-correction - summarised source mistaken for verbatim
 
 The first attempt to read the upstream README used a fetch tool that returns an
-*LLM-summarised* rendering of the page rather than its source. The summary was fluent and
-plausible, and it silently:
+*LLM-summarised* rendering rather than the source. The summary was fluent and plausible, and it
+silently dropped the fact that the "AWS S3 SELECT" hyperlink points at the **S3 Glacier Select**
+documentation (finding B2), omitted the malformed `s3://` URI (B3), and paraphrased the
+specification of the `0` sentinel, losing the wording the B4 ambiguity turns on.
 
-- dropped the fact that the "AWS S3 SELECT" hyperlink points at the **S3 Glacier Select**
-  documentation (finding B2, which only exists because the raw markdown was read);
-- omitted the malformed `s3://` URI (B3);
-- paraphrased the specification of the `0` sentinel, losing the precise wording that the
-  ambiguity in B4 turns on;
-- reported the active branch as `main` while the raw fetch had succeeded against `master`.
+Auditing a document for discrepancies against a *paraphrase* of it is self-defeating. The raw
+markdown was fetched instead and the audit redone against it.
 
-Auditing a document for discrepancies against a *paraphrase* of that document is
-self-defeating: every finding in `docs/discrepancies.md` section B depends on exact wording.
-The raw markdown was fetched instead and the audit redone against it, and the branch question
-was settled properly by querying the API - `main` is the default, `master` is a stale
-duplicate, and the two READMEs are byte-identical today (B8).
+*Caught by the AI, so this does not satisfy the brief's requirement.*
 
-*Noted as a process correction. This was caught by the AI itself, so it does **not** satisfy the
-brief's requirement below.*
+### 2. Candidate-driven - the data quality checks were lopsided
 
-### 1b. AI self-correction during session 2 - near-miss false alarm on wheel availability
+**This is the primary example.**
 
-The script written to check PyPI wheel availability matched only on CPython ABI tags
-(`cp311`...`cp314`). `geopandas` and `boto3` are pure Python and ship **universal**
-`py3-none-any` wheels, which carry no such tag, so the script reported them as source-only.
-Taken at face value this would have produced a confident and wrong warning that two core
-dependencies had no wheels for Python 3.14. Caught on re-inspection and verified with a second
-query before anything was reported.
+After Section 2 was working and validating at 99.9969%, Naveen asked what data quality metrics
+were in place, noting that the supplied data being clean says nothing about how the system
+behaves on a source that is not.
 
-Worth recording because it is the more dangerous failure mode: not a visibly wrong answer, but
-a plausible one produced by a subtly wrong test.
+The honest answer was that the checks were badly asymmetric. The **hexagon** side had a proper
+contract from the start - `config/hex_schema.yaml`, twelve weighted rules, non-binary scoring.
+The **service request** side had **nothing**: no column assertions, no null-rate ceilings, no
+temporal validation, no uniqueness check, no row-count sanity. The pipeline consumed 941,634
+rows of input it never checked. Pointed at a renamed column it would raise `KeyError`; at a
+column gone entirely null, or a ten-row truncated extract, it would have produced confident and
+wrong output.
 
-*Also caught by the AI, so this too does **not** satisfy the requirement below.*
+Worse, the AI had *written down* this exact requirement in `docs/discrepancies.md` B10 - "assert
+the expected header on load so a future upstream rename fails loudly" - and then not implemented
+it. It had measured clean data and concluded the data was clean, which is a coincidence, not a
+check.
 
-### 2. Correction by the candidate
+**The bug this surfaced.** `classify_coordinates` used **OR** across latitude and longitude:
 
-> **TO BE COMPLETED BY NAVEEN.**
->
-> The brief requires an example where *you* corrected the tool's output. This must be a real
-> correction made during implementation, and it cannot be written on your behalf without
-> defeating the purpose of the requirement - the assessors have said they read this section and
-> that critical use counts in the candidate's favour.
->
-> Good candidates are likely to surface during Sections 1 and 2. Record: what the AI produced,
-> what was wrong with it, how you found out, and what you changed it to.
+```python
+missing = lat_null | lon_null          # wrong
+```
+
+So a record with a latitude but no longitude was classed `MISSING`, handed the no-geolocation
+sentinel `0`, and counted as a legitimate ungeolocated record. The fault would have vanished
+into an expected total of 212,364 with nothing downstream revealing it. This dataset contains
+zero such records, so it never manifested - which is precisely the failure mode the question
+was about. It is now:
+
+```python
+missing = lat_null & lon_null          # both absent
+partial = lat_null ^ lon_null          # exactly one: a hard violation
+```
+
+**What the new contract then found in the supplied data:**
+
+1. **5,483 rows (0.58%) complete before they are created.** Investigated before adjusting any
+   threshold: every one is sub-hour, median -4 seconds, worst -15m41s. That is clock skew
+   between the systems recording creation and completion, not a logical fault. The rule was
+   split by magnitude rather than loosened - gross inversions beyond an hour keep a limit of
+   zero, because no amount of drift explains a day backwards.
+2. **`reference_number` is 37% blank**, against an assumed ceiling of 5%.
+
+Both thresholds had been set by intuition and both were wrong. Every null ceiling is now
+calibrated against the measured baseline with headroom, with the observed figure recorded
+beside it.
+
+**Changed:** added `config/sr_schema.yaml` and `src/sr_validation.py`; fixed the OR/AND bug and
+added the `PARTIAL` class; split the temporal rule by magnitude; calibrated all ceilings from
+measurement; added 13 tests that feed the validator *deliberately broken* data, since testing
+only against the clean supplied dataset would prove nothing about whether the checks fire.
+
+### 3. Candidate-driven - assumptions asserted as facts
+
+Naveen then asked for everything guessed or assumed to be re-checked and validated. Ten
+asserted constants were audited against the data (`docs/discrepancies.md` section F). Eight held
+up. Two did not:
+
+**The real error.** The AI had stated three times across the documentation that H3 resolution-8
+cells "average approximately 0.737 km squared". That is H3's **global** mean. H3 projects cells
+onto an icosahedron, so area varies with position: measured across the actual 3,832 Cape Town
+cells the mean is **0.697990 km squared** - 5.3% smaller. The derived estimate of ~3,300
+hexagons was consequently 13.9% low against 3,832 actual. Recomputed with the measured area it
+predicts ~3,503, with the remaining ~9% being cells straddling the municipal boundary.
+
+Nothing downstream depended on it, and it had been flagged at the time as "an estimate to be
+confirmed, not a measurement". But it was repeated as though established, and a reader would
+reasonably have taken it as fact. `h3.cell_area()` on the real cells costs milliseconds and is
+exact.
+
+**The overstatement.** The README claimed coordinate de-duplication would be "the single largest
+algorithmic win" because service requests "cluster heavily" on repeated addresses. Measured:
+460,413 unique pairs from 729,270 rows - a 1.58x reduction. Real, but modest, and not the
+headline saving. Corrected.
+
+Also corrected: CoCT area 2,446 to 2,445 km squared, and a "~3x" threshold ratio restated as its
+actual 3.43x.
+
+### 4. Candidate-driven - a test that silently skipped instead of failing
+
+While writing the tie-break tests, the fixture located H3 vertices shared between adjacent cells
+by rounding coordinates to 10 decimal places. That nudged the derived point about 5e-12 degrees
+off the true boundary, so it fell *strictly inside* one polygon and the test **skipped rather
+than failing**. The suite was green while not exercising the tie-break at all.
+
+Probing directly showed H3 emits **bit-identical** coordinates for a shared vertex, so exact
+comparison finds them: an exact vertex intersects 3 polygons and an exact edge midpoint
+intersects 2. Both cases now assert the correct rule and candidate count.
+
+Worth recording as the more dangerous failure mode: not a visibly wrong answer, but a passing
+test that was not testing the thing it claimed to.
+
+---
+
+## Standing lesson
+
+Three of the four corrections share a root cause: **the AI validated against the data in front
+of it and reported the result as a general property.** Clean data scored well, so the checks
+looked adequate; a rounded fixture still passed, so the test looked adequate; a published
+constant was close enough, so it went unchecked. In each case the output was confident and the
+gap invisible until someone asked what would happen with different input.
