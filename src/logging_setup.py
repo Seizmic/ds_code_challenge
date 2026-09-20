@@ -74,7 +74,7 @@ class RunManifest:
         return self._data
 
     def write(self, path: Path | None = None) -> Path:
-        path = path or config.RUN_MANIFEST_PATH
+        path = path or config.quality_path("run_manifest")
         path.parent.mkdir(parents=True, exist_ok=True)
         self._data["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         with path.open("w", encoding="utf-8") as handle:

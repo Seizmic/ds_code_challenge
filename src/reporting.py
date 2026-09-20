@@ -15,9 +15,6 @@ from src import config
 
 logger = logging.getLogger(__name__)
 
-RESULTS_PATH = config.PROJECT_ROOT / "docs" / "results.md"
-
-
 def _fmt(value: Any) -> str:
     if isinstance(value, float):
         # No trailing-zero stripping: a conformance score of 1.000000 must not
@@ -32,8 +29,9 @@ def _pct(value: float) -> str:
     return f"{value * 100:.6f}%".replace(".000000%", "%")
 
 
-def generate(manifest: dict[str, Any], path: Path = RESULTS_PATH) -> Path:
+def generate(manifest: dict[str, Any], path: Path | None = None) -> Path:
     """Render the results document."""
+    path = path or config.RESULTS_FILE
     m = manifest.get("metrics", {})
     t = manifest.get("timings_seconds", {})
     v = manifest.get("verdicts", {})

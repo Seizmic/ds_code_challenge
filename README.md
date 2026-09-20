@@ -29,7 +29,8 @@ automatically and cached under `data/raw/`, so reruns skip the network.
 | `python -m src.main --section 1` | Extraction only |
 | `python -m src.main --baseline` | Also run the naive download baseline for comparison |
 | `python -m src.main --join-method library` | Publish the H3 library assignment instead |
-| `python -m pytest tests/ -q` | 118 tests |
+| `python -m src.main --data-dir ./runs/library` | Write outputs elsewhere, so two runs can coexist |
+| `python -m pytest tests/ -q` | 120 tests |
 
 ---
 

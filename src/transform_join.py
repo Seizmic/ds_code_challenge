@@ -325,11 +325,6 @@ def categorise_disagreements(
 # Orchestration
 # =============================================================================
 
-OUTPUT_PATH = config.PROCESSED_DIR / "sr_hex.csv.gz"
-AMBIGUOUS_PATH = config.QUALITY_DIR / "ambiguous_hex_assignments.csv"
-DISAGREEMENT_PATH = config.QUALITY_DIR / "method_disagreements.csv"
-JOIN_SUMMARY_PATH = config.QUALITY_DIR / "join_summary.json"
-
 ID_COLUMN = "notification_number"
 
 
@@ -607,12 +602,12 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
                    "chose_nearest_centroid"]
         ambiguous[columns].rename(
             columns={"h3_geometric": "chosen_index"}
-        ).to_csv(AMBIGUOUS_PATH, index=False)
+        ).to_csv(config.quality_path("ambiguous"), index=False)
         logger.warning(
             "Ambiguous hex assignment: %d unique coordinate pair(s) matched more "
             "than one polygon (%.4f%% of geolocated). Resolved by nearest-centroid "
             "tie-break. Detail: %s",
-            len(ambiguous), 100.0 * len(ambiguous) / max(n_geolocated, 1), AMBIGUOUS_PATH,
+            len(ambiguous), 100.0 * len(ambiguous) / max(n_geolocated, 1), config.quality_path("ambiguous"),
         )
         logger.info(
             "  tie-break margin: median %.3f m, max %.3f m",
@@ -641,7 +636,7 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
             out = disagree[["latitude", "longitude", "h3_geometric", "h3_library",
                             "rule", "n_candidates", "margin_m"]].copy()
             out["category"] = cats.to_numpy()
-            out.to_csv(DISAGREEMENT_PATH, index=False)
+            out.to_csv(config.quality_path("disagreements"), index=False)
             logger.info("Disagreement categories:")
             for name, count in sorted(categories.items()):
                 logger.info("  %-20s %8d", name, count)
@@ -664,8 +659,9 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
     MANIFEST.record_verdict("section2.class_d_threshold", d_ok,
                             f"{class_d_rate:.8f} vs {thresholds['class_d_malformed']}")
 
-    JOIN_SUMMARY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with JOIN_SUMMARY_PATH.open("w", encoding="utf-8") as handle:
+    summary_path = config.quality_path("join_summary")
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    with summary_path.open("w", encoding="utf-8") as handle:
         json.dump({
             "n_records": int(len(df)),
             "n_geolocated": n_geolocated,
@@ -682,7 +678,7 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
     if not b_ok:
         raise ValueError(
             f"Join failure rate {class_b_rate:.4%} exceeds the threshold "
-            f"{thresholds['class_b_no_hex_match']:.4%}. See {JOIN_SUMMARY_PATH}."
+            f"{thresholds['class_b_no_hex_match']:.4%}. See {config.quality_path("join_summary")}."
         )
     if not d_ok:
         raise ValueError(
@@ -730,9 +726,10 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
         output["h3_level8_index"] = (
             result["h3_level8_index"].fillna(config.NO_GEOLOCATION_INDEX)
         )
-        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        output.to_csv(OUTPUT_PATH, index=False, compression="gzip")
-    logger.info("Wrote %d rows to %s", len(output), OUTPUT_PATH)
+        output_path = config.processed_path("sr_hex")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output.to_csv(output_path, index=False, compression="gzip")
+    logger.info("Wrote %d rows to %s", len(output), output_path)
 
     return {
         "output": output,

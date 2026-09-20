@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import logging
 import sys
+from pathlib import Path
 
 from src import config, extract_hex, reporting, s3_io, transform_join
 from src.logging_setup import MANIFEST, configure_logging, timed
@@ -36,6 +37,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "config.JOIN_METHOD (currently %(default)s -> geometric).",
     )
     parser.add_argument(
+        "--data-dir", type=Path, default=None,
+        help="Write all data and artifacts beneath this directory instead of "
+             "./data. Use it to keep two runs side by side, since both "
+             "--join-method settings otherwise write the same filename.",
+    )
+    parser.add_argument(
         "--verbose", "-v", action="store_true", help="Enable debug logging.",
     )
     return parser.parse_args(argv)
@@ -44,6 +51,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     configure_logging(logging.DEBUG if args.verbose else logging.INFO)
+    if args.data_dir:
+        config.set_data_dir(args.data_dir)
     config.ensure_directories()
     if args.join_method:
         config.JOIN_METHOD = args.join_method

@@ -40,23 +40,19 @@ class StubClient:
         return {"ETag": '"stub"', "ContentLength": 1}
 
 
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def workspace(tmp_path, monkeypatch):
-    """Redirect every output path into a temporary directory."""
-    for name in ("RAW_DIR", "INTERIM_DIR", "PROCESSED_DIR", "QUALITY_DIR"):
-        directory = tmp_path / name.lower()
-        directory.mkdir(parents=True, exist_ok=True)
-        monkeypatch.setattr(config, name, directory)
+    """Redirect every output path into a temporary directory.
 
-    monkeypatch.setattr(transform_join, "OUTPUT_PATH",
-                        tmp_path / "processed" / "sr_hex.csv.gz")
-    monkeypatch.setattr(transform_join, "AMBIGUOUS_PATH",
-                        tmp_path / "quality" / "ambiguous_hex_assignments.csv")
-    monkeypatch.setattr(transform_join, "DISAGREEMENT_PATH",
-                        tmp_path / "quality" / "method_disagreements.csv")
-    monkeypatch.setattr(transform_join, "JOIN_SUMMARY_PATH",
-                        tmp_path / "quality" / "join_summary.json")
-    return tmp_path
+    Autouse and restoring: `config.set_data_dir` mutates module globals, so a
+    test that redirects them would otherwise leak into every later test in the
+    session.
+    """
+    original = config.DATA_DIR
+    config.set_data_dir(tmp_path / "data")
+    config.ensure_directories()
+    yield tmp_path
+    config.set_data_dir(original)
 
 
 def build_inputs(n: int = 1200) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
@@ -93,11 +89,11 @@ class TestSectionTwoWiring:
 
         # The pipeline produced output for every input row.
         assert len(result["output"]) == len(sr)
-        assert transform_join.OUTPUT_PATH.exists()
+        assert config.processed_path("sr_hex").exists()
 
         # The quality side-car is written, not merely computed.
-        assert transform_join.JOIN_SUMMARY_PATH.exists()
-        summary = json.loads(transform_join.JOIN_SUMMARY_PATH.read_text())
+        assert config.quality_path("join_summary").exists()
+        summary = json.loads(config.quality_path("join_summary").read_text())
         assert summary["n_records"] == len(sr)
         assert summary["n_geolocated"] == len(sr)
 
@@ -170,6 +166,44 @@ class TestSectionTwoWiring:
 
         with pytest.raises(ValueError, match="JOIN_METHOD"):
             transform_join.run(StubClient(sr, reference), hex_features=features)
+
+
+class TestDataDirRedirection:
+    """`--data-dir` exists for one concrete reason, tested here.
+
+    Both `--join-method` settings write the same output filename, so comparing
+    the geometric and library results requires somewhere separate to put them.
+    Without this the second run silently overwrites the first.
+    """
+
+    def test_outputs_follow_the_configured_data_dir(self, tmp_path, monkeypatch):
+        sr, reference, features = build_inputs()
+
+        first = tmp_path / "run_geometric"
+        monkeypatch.setattr(config, "JOIN_METHOD", "geometric")
+        config.set_data_dir(first)
+        config.ensure_directories()
+        transform_join.run(StubClient(sr, reference), hex_features=features)
+
+        second = tmp_path / "run_library"
+        monkeypatch.setattr(config, "JOIN_METHOD", "library")
+        config.set_data_dir(second)
+        config.ensure_directories()
+        transform_join.run(StubClient(sr, reference), hex_features=features)
+
+        # Both runs survive: neither clobbered the other.
+        assert (first / "processed" / "sr_hex.csv.gz").exists()
+        assert (second / "processed" / "sr_hex.csv.gz").exists()
+        assert (first / "quality" / "join_summary.json").exists()
+        assert (second / "quality" / "join_summary.json").exists()
+
+    def test_set_data_dir_moves_every_directory(self, tmp_path):
+        config.set_data_dir(tmp_path / "elsewhere")
+        assert config.RAW_DIR == tmp_path / "elsewhere" / "raw"
+        assert config.PROCESSED_DIR == tmp_path / "elsewhere" / "processed"
+        assert config.QUALITY_DIR == tmp_path / "elsewhere" / "quality"
+        assert config.processed_path("sr_hex").parent == config.PROCESSED_DIR
+        assert config.quality_path("join_summary").parent == config.QUALITY_DIR
 
 
 class TestOutputShape:

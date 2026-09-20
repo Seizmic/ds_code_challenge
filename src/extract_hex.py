@@ -18,9 +18,6 @@ from src.logging_setup import MANIFEST, human_bytes, timed
 
 logger = logging.getLogger(__name__)
 
-OUTPUT_PATH = config.PROCESSED_DIR / "city-hex-polygons-8-extracted.geojson"
-
-
 def extract_via_s3_select(client) -> tuple[list[dict[str, Any]], dict[str, int]]:
     """Pull resolution-8 features using server-side filtering."""
     with timed("section1.s3_select_extraction", logger):
@@ -68,8 +65,9 @@ def load_reference(client) -> list[dict[str, Any]]:
     return collection["features"]
 
 
-def write_output(features: list[dict[str, Any]], path: Path = OUTPUT_PATH) -> Path:
+def write_output(features: list[dict[str, Any]], path: Path | None = None) -> Path:
     """Write the extracted features as a GeoJSON FeatureCollection."""
+    path = path or config.processed_path("hex_extracted")
     path.parent.mkdir(parents=True, exist_ok=True)
     collection = {
         "type": "FeatureCollection",

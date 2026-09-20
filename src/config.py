@@ -25,7 +25,50 @@ QUALITY_DIR = DATA_DIR / "quality"
 
 HEX_SCHEMA_PATH = CONFIG_DIR / "hex_schema.yaml"
 SR_SCHEMA_PATH = CONFIG_DIR / "sr_schema.yaml"
-RUN_MANIFEST_PATH = QUALITY_DIR / "run_manifest.json"
+
+# --- Output filenames --------------------------------------------------------
+# Names only, resolved against the current data directory at call time rather
+# than frozen at import. Held here because this module's docstring promises that
+# no other module hard-codes a path literal, and six of these previously lived
+# in extract_hex and transform_join, which made that promise false.
+OUTPUT_FILES = {
+    "hex_extracted": "city-hex-polygons-8-extracted.geojson",
+    "sr_hex": "sr_hex.csv.gz",
+}
+QUALITY_FILES = {
+    "run_manifest": "run_manifest.json",
+    "ambiguous": "ambiguous_hex_assignments.csv",
+    "disagreements": "method_disagreements.csv",
+    "join_summary": "join_summary.json",
+}
+RESULTS_FILE = PROJECT_ROOT / "docs" / "results.md"
+
+
+def set_data_dir(path: Path) -> None:
+    """Redirect every data directory beneath ``path``.
+
+    Exists for one concrete reason rather than as general configurability: both
+    ``--join-method`` settings write to the same output filename, so comparing
+    the geometric and library results side by side is otherwise impossible
+    without one clobbering the other. It is also what lets the pipeline run
+    from a read-only checkout.
+    """
+    global DATA_DIR, RAW_DIR, INTERIM_DIR, PROCESSED_DIR, QUALITY_DIR
+    DATA_DIR = Path(path)
+    RAW_DIR = DATA_DIR / "raw"
+    INTERIM_DIR = DATA_DIR / "interim"
+    PROCESSED_DIR = DATA_DIR / "processed"
+    QUALITY_DIR = DATA_DIR / "quality"
+
+
+def processed_path(key: str) -> Path:
+    """Resolve an output file under the current processed directory."""
+    return PROCESSED_DIR / OUTPUT_FILES[key]
+
+
+def quality_path(key: str) -> Path:
+    """Resolve a quality artifact under the current quality directory."""
+    return QUALITY_DIR / QUALITY_FILES[key]
 
 # --- S3 ----------------------------------------------------------------------
 
