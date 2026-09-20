@@ -1,0 +1,40 @@
+# --- Credentials: never commit ---
+# The challenge supplies AWS credentials at runtime; they must not be stored in the repo.
+ds_code_challenge_creds.json
+*credentials*.json
+.env
+.env.*
+!.env.example
+.aws/
+
+# --- Data ---
+# Inputs are downloaded at runtime and cached; outputs are regenerated.
+data/
+!data/.gitkeep
+!data/**/.gitkeep
+*.csv.gz
+*.geojson
+!tests/fixtures/**
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- Editors / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Logs ---
+*.log
+logs/

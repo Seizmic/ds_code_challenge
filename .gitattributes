@@ -1,0 +1,19 @@
+# Normalise line endings in the repository to LF.
+# Development happens on Windows but the assessors will most likely run this on
+# Linux or macOS, where CRLF in a shell entrypoint fails with an obscure
+# "bad interpreter" error. Committing LF keeps the repo portable.
+* text=auto eol=lf
+
+# Shell scripts must be LF regardless of platform.
+*.sh text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets - never touch.
+*.png binary
+*.jpg binary
+*.gz  binary
+*.zip binary
