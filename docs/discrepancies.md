@@ -483,3 +483,57 @@ it as a genuine coin-flip in the side-car.
 `margin_m` is now unsigned, and a new `chose_nearest_centroid` column records
 whether criteria 1 and 2 agreed. A `False` marks precisely the near-boundary
 case where nearest-centroid was measured to be unreliable.
+
+---
+
+## K. Polygon overlap check (2026-09-20)
+
+Added after asking whether one was worth having. The answer was yes, on three
+grounds, none of which is "it might find something here" - it does not.
+
+**1. The existing guard was point-driven, not data-driven.**
+`assign_hexagons_geometric` already routes a point that lands strictly inside
+more than one polygon through the tie-break. But that only fires *where a
+service request happens to be*. An overlap in an area with no requests is
+completely invisible to it. That is the same flaw as validating against the data
+in front of you and reporting the result as a general property.
+
+**2. It checks the cause, not the symptom.** Overlapping polygons are precisely
+the structural defect that makes one service request match two cells and
+duplicate downstream. The whole R0-R4 rule exists to contain that symptom, while
+nothing verified the input property that would produce it.
+
+**3. "H3 guarantees non-overlap" is the argument already rejected.** That is the
+reasoning that left `must_be_valid` declared but unenforced (section H). We are
+validating a supplied file, not trusting the process that generated it.
+
+### Result on the supplied data
+
+```
+3,832 polygons, 10,979 adjacent pairs examined
+pairs overlapping with positive area : 0
+intersection geometry types          : {'LineString': 10979}
+cost                                 : ~0.3 s  (~1% of a 33 s run)
+```
+
+Every adjacent pair intersects as a **zero-area LineString** - a shared edge,
+exactly as H3 requires. The tiling is a true partition.
+
+### Design notes
+
+- Adjacent H3 cells share edges by design, so `intersects` is True for all 10,979
+  neighbouring pairs. Only **positive area** is a defect. A check that flagged
+  every neighbour would be useless, and the test suite asserts this explicitly.
+- Tolerance `1.0e-14 deg2` (~1.2e-4 m2) absorbs floating-point noise at seams.
+  Measured maximum here was exactly `0.0`.
+- Implemented with an STRtree query rather than all-pairs: 14.7M naive
+  comparisons reduce to 10,979 candidate pairs.
+- A detected overlap **fails the run**. Unlike a coverage gap, which is a
+  property of the supplied data worth reporting, an overlapping tiling makes the
+  "exactly one hexagon per request" guarantee unachievable, so continuing would
+  produce silently duplicated records.
+
+It will almost certainly never fire. That is not an argument against it - by the
+reasoning in section G, a check that has never fired is indistinguishable from a
+check that is broken, which is why seven tests drive it against deliberately
+overlapping fixtures.

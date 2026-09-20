@@ -81,6 +81,27 @@ def generate(manifest: dict[str, Any], path: Path = RESULTS_PATH) -> Path:
     add(f"- Geometry mismatches: {_fmt(comparison.get('n_geometry_mismatches', 0))}")
     add(f"- **Byte-identical geometries: {_fmt(comparison.get('n_geometry_exact_matches', 0))}**")
     add("")
+    overlaps = m.get("section1.polygon_overlaps", {})
+    if overlaps:
+        add("")
+        add("### Polygon overlap")
+        add("")
+        add(f"- Adjacent pairs examined: **{_fmt(overlaps.get('n_pairs_checked', 0))}**")
+        add(f"- Pairs overlapping with positive area: "
+            f"**{_fmt(overlaps.get('n_overlapping', 0))}**")
+        add("")
+        if not overlaps.get("n_overlapping"):
+            add("Every adjacent pair intersects as a zero-area line - a shared edge,")
+            add("which is what H3 requires. Checked in the input rather than inferred")
+            add("from the output: the join already guards against a point landing in")
+            add("two polygons, but that only fires where a service request happens to")
+            add("be, so an overlap in an empty area would be invisible to it.")
+        else:
+            for example in overlaps.get("examples", []):
+                add(f"- `{example['a']}` / `{example['b']}` "
+                    f"area {example['area_deg2']:.3e} deg2")
+        add("")
+
     add("Every geometry matched exactly, so the coordinate tolerance in")
     add("`config/hex_schema.yaml` was never needed. The comparison runs on the")
     add("intersection of properties because the reference file carries no")

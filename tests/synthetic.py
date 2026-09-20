@@ -147,6 +147,30 @@ def hex_with_hole() -> dict[str, Any]:
     return f
 
 
+def overlapping_pair() -> list[dict[str, Any]]:
+    """Two polygons that overlap with positive area.
+
+    Built by shifting one cell's ring a fraction of its width toward its
+    neighbour, so the two interiors genuinely intersect rather than merely
+    sharing an edge. H3 never produces this; the point is that we are
+    validating a supplied file, not trusting its generator.
+    """
+    a = hex_feature(ANCHOR_CELL)
+    neighbour = sorted(h3.grid_ring(ANCHOR_CELL, 1))[0]
+    b = hex_feature(neighbour)
+
+    a_lat, a_lon = h3.cell_to_latlng(ANCHOR_CELL)
+    b_lat, b_lon = h3.cell_to_latlng(neighbour)
+    # Move b a third of the way onto a, so their interiors overlap.
+    dx, dy = (a_lon - b_lon) / 3.0, (a_lat - b_lat) / 3.0
+    b["geometry"]["coordinates"][0] = [
+        [lon + dx, lat + dy] for lon, lat in b["geometry"]["coordinates"][0]
+    ]
+    b["properties"]["centroid_lat"] = b_lat + dy
+    b["properties"]["centroid_lon"] = b_lon + dx
+    return [a, b]
+
+
 def hex_out_of_bounds() -> dict[str, Any]:
     """A geometrically valid cell in the wrong city (Johannesburg)."""
     return hex_feature(h3.latlng_to_cell(-26.2041, 28.0473, 8))

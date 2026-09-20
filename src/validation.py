@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import logging
 import re
+
+import numpy as np
 from typing import Any, Callable
 
+from shapely import STRtree, area, intersection
 from shapely.geometry import Polygon
 
 logger = logging.getLogger(__name__)
@@ -217,6 +220,93 @@ RULES: dict[str, RuleFn] = {
     "centroid_within_polygon": rule_centroid_within_polygon,
     "resolution_correct": rule_resolution_correct,
 }
+
+
+def check_overlaps(
+    features: list[Feature], schema: dict[str, Any]
+) -> dict[str, Any]:
+    """Detect polygons that overlap with positive area.
+
+    Collection-level rather than per-feature: overlap is a relationship between
+    polygons, so no amount of inspecting one feature reveals it.
+
+    **Why this exists when H3 guarantees non-overlap.** We are validating a
+    supplied file, not trusting the process that produced it. The same reasoning
+    retired `must_be_valid` as dead configuration: a guarantee asserted by the
+    generator is not a property verified in the artifact.
+
+    **Why the existing check was not enough.** ``assign_hexagons_geometric``
+    already guards against a point landing strictly inside two polygons, but
+    that is *point-driven* - it only fires where a service request happens to
+    be. An overlap in an area with no requests is invisible to it. This checks
+    the cause in the input rather than the symptom in the output.
+
+    Adjacent H3 cells share edges by design, so a shared boundary produces a
+    zero-area LineString intersection. Only positive area is a defect, and a
+    small tolerance absorbs floating-point noise at the seams.
+    """
+    tolerance = float(
+        schema["collection"].get("max_overlap_area_deg2", 1.0e-14)
+    )
+    geometries = []
+    indices = []
+    for feature in features:
+        ring = _ring(feature)
+        if len(ring) < 4:
+            continue
+        try:
+            geometries.append(Polygon(ring))
+        except Exception:  # noqa: BLE001 - malformed geometry is scored elsewhere
+            continue
+        indices.append(_props(feature).get("index", "<no index>"))
+
+    if len(geometries) < 2:
+        return {"n_polygons": len(geometries), "n_pairs_checked": 0,
+                "n_overlapping": 0, "max_overlap_area_deg2": 0.0, "examples": []}
+
+    geometries = np.array(geometries, dtype=object)
+    tree = STRtree(geometries)
+    left, right = tree.query(geometries, predicate="intersects")
+    unique = left < right          # each unordered pair once, self-pairs dropped
+    left, right = left[unique], right[unique]
+
+    areas = area(intersection(geometries[left], geometries[right]))
+    offending = areas > tolerance
+
+    examples = [
+        {"a": indices[int(i)], "b": indices[int(j)], "area_deg2": float(a)}
+        for i, j, a in zip(left[offending], right[offending], areas[offending])
+    ][:5]
+
+    return {
+        "n_polygons": len(geometries),
+        "n_pairs_checked": int(len(left)),
+        "n_overlapping": int(offending.sum()),
+        "max_overlap_area_deg2": float(areas.max()) if len(areas) else 0.0,
+        "tolerance_deg2": tolerance,
+        "examples": examples,
+    }
+
+
+def log_overlaps(report: dict[str, Any]) -> None:
+    """Log the overlap report at a level matching its result."""
+    if report["n_overlapping"]:
+        logger.error(
+            "Polygon overlap: %d of %d pairs overlap with positive area "
+            "(max %.3e deg2). Overlapping hexagons cause a point to match more "
+            "than one cell, which duplicates service requests downstream.",
+            report["n_overlapping"], report["n_pairs_checked"],
+            report["max_overlap_area_deg2"],
+        )
+        for example in report["examples"]:
+            logger.error("    %s / %s  area=%.3e deg2",
+                         example["a"], example["b"], example["area_deg2"])
+    else:
+        logger.info(
+            "Polygon overlap: none. %d adjacent pairs share edges only "
+            "(zero-area intersections), as H3 requires.",
+            report["n_pairs_checked"],
+        )
 
 
 def score_conformance(features: list[Feature], schema: dict) -> dict[str, Any]:

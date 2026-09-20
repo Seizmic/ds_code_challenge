@@ -4,7 +4,7 @@
 figure below is read from the manifest of the run that produced it, so this
 document cannot drift from what the code actually did.
 
-Run started `2026-09-20T19:40:23+0200` on Python `3.14.3`.
+Run started `2026-09-20T20:50:05+0200` on Python `3.14.3`.
 
 ---
 
@@ -18,7 +18,7 @@ Run started `2026-09-20T19:40:23+0200` on Python `3.14.3`.
 | Bytes scanned | 108,254,980 |
 | Bytes returned | 1,946,734 |
 | **Transfer reduction** | **98.202%** |
-| Extraction time | 3.085s |
+| Extraction time | 3.220s |
 
 ### Validation against `city-hex-polygons-8.geojson`
 
@@ -28,6 +28,18 @@ Run started `2026-09-20T19:40:23+0200` on Python `3.14.3`.
 - Property mismatches: 0
 - Geometry mismatches: 0
 - **Byte-identical geometries: 3,832**
+
+
+### Polygon overlap
+
+- Adjacent pairs examined: **10,979**
+- Pairs overlapping with positive area: **0**
+
+Every adjacent pair intersects as a zero-area line - a shared edge,
+which is what H3 requires. Checked in the input rather than inferred
+from the output: the join already guards against a point landing in
+two polygons, but that only fires where a service request happens to
+be, so an overlap in an empty area would be invisible to it.
 
 Every geometry matched exactly, so the coordinate tolerance in
 `config/hex_schema.yaml` was never needed. The comparison runs on the
@@ -73,9 +85,9 @@ vertex cases explicitly.
 ### Efficiency
 
 - Unique coordinate pairs: **460,413** (63.1% of geolocated rows, 1.58x less join work)
-- Geometric join: 1.196s
-- H3 library assignment: 0.706s
-- **Total pipeline: 41.3s**
+- Geometric join: 0.772s
+- H3 library assignment: 0.357s
+- **Total pipeline: 32.5s**
 
 ## Method comparison - geometric vs H3 library
 
@@ -154,6 +166,7 @@ No cross-column consistency violations.
 | Check | Result | Detail |
 |---|---|---|
 | `pipeline` | **PASS** | completed |
+| `section1.no_overlapping_polygons` | **PASS** | 0 overlapping of 10979 adjacent pairs |
 | `section1.reference_match` | **PASS** | 3832 common of 3832 reference features |
 | `section1.schema_conformance` | **PASS** | score=1.0 verdict=pass |
 | `section2.class_b_threshold` | **PASS** | 0.00000411 vs 0.005 |

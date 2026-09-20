@@ -96,6 +96,11 @@ collection:
   # 0.697990 km2 (range 0.6910-0.7030), 5.3% smaller. With CoCT at ~2,445 km2 that
   # predicts ~3,503 cells, against 3,832 actual -- the ~9% excess being cells that
   # straddle the municipal boundary.
+  # No two polygons may overlap with positive area. Adjacent H3 cells share
+  # edges by design, so a shared boundary intersects as a zero-area line; only
+  # positive area is a defect. Tolerance absorbs floating-point noise at seams:
+  # 1e-14 deg2 is roughly 1.2e-4 m2, far below any meaningful sliver.
+  max_overlap_area_deg2: 1.0e-14
   min_features: 2500
   max_features: 5000
 

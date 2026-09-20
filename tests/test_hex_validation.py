@@ -14,7 +14,11 @@ from __future__ import annotations
 import pytest
 
 from src import config
-from src.validation import compare_to_reference, score_conformance
+from src.validation import (
+    check_overlaps,
+    compare_to_reference,
+    score_conformance,
+)
 from tests import synthetic
 
 
@@ -155,6 +159,71 @@ class TestScoringBehaviour:
         report = score_conformance([*clean[:-1], synthetic.hex_wrong_resolution()], schema)
         examples = report["failures"]["resolution_correct"]
         assert examples and all(isinstance(e, str) for e in examples)
+
+
+class TestPolygonOverlap:
+    """Overlap is a relationship BETWEEN polygons, so no per-feature rule sees it.
+
+    H3 guarantees a partition, but we are validating a supplied file rather
+    than trusting the generator - the same reasoning that retired
+    `must_be_valid` as dead configuration.
+    """
+
+    def test_shared_edges_are_not_overlaps(self, clean, schema):
+        """Adjacent cells touch by design; that must not be flagged.
+
+        A check that fired on every neighbouring pair would be useless, so
+        this is the assertion that makes the rule meaningful at all.
+        """
+        report = check_overlaps(clean, schema)
+
+        assert report["n_overlapping"] == 0
+        assert report["n_pairs_checked"] > 0, "no adjacent pairs were examined"
+        assert report["max_overlap_area_deg2"] == 0.0
+
+    def test_genuine_overlap_is_detected(self, schema):
+        report = check_overlaps(synthetic.overlapping_pair(), schema)
+
+        assert report["n_overlapping"] == 1
+        assert report["max_overlap_area_deg2"] > 0
+        assert len(report["examples"]) == 1
+        assert report["examples"][0]["a"] != report["examples"][0]["b"]
+
+    def test_overlap_is_found_when_hidden_among_clean_polygons(self, clean, schema):
+        """The realistic case: one bad pair inside an otherwise sound tiling."""
+        report = check_overlaps([*clean, *synthetic.overlapping_pair()], schema)
+        assert report["n_overlapping"] >= 1
+
+    def test_overlap_is_logged_as_an_error(self, schema, caplog):
+        import logging
+
+        from src.validation import log_overlaps
+
+        with caplog.at_level(logging.ERROR, logger="src.validation"):
+            log_overlaps(check_overlaps(synthetic.overlapping_pair(), schema))
+
+        assert "overlap" in caplog.text.lower()
+        assert "duplicates service requests" in caplog.text
+
+    def test_clean_collection_logs_the_reassuring_case(self, clean, schema, caplog):
+        import logging
+
+        from src.validation import log_overlaps
+
+        with caplog.at_level(logging.INFO, logger="src.validation"):
+            log_overlaps(check_overlaps(clean, schema))
+
+        assert "none" in caplog.text.lower()
+
+    def test_single_polygon_is_handled(self, schema):
+        """Fewer than two polygons means no pair to compare."""
+        report = check_overlaps([synthetic.hex_feature()], schema)
+        assert report["n_overlapping"] == 0
+        assert report["n_pairs_checked"] == 0
+
+    def test_malformed_geometry_does_not_raise(self, clean, schema):
+        report = check_overlaps([*clean, {}, {"geometry": None}], schema)
+        assert report["n_overlapping"] == 0
 
 
 class TestReferenceComparison:

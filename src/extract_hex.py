@@ -138,6 +138,30 @@ def run(client=None, run_baseline: bool = False) -> dict[str, Any]:
             "See the rule breakdown above."
         )
 
+    # --- Polygon overlap (collection-level) ----------------------------------
+    # Checks the CAUSE in the input rather than the symptom in the output. The
+    # join already guards against a point landing inside two polygons, but that
+    # only fires where a service request happens to be; an overlap in an area
+    # with no requests is invisible to it.
+    with timed("section1.overlap_check", logger):
+        overlaps = validation.check_overlaps(features, schema)
+    validation.log_overlaps(overlaps)
+    MANIFEST.record_metric("section1.polygon_overlaps", overlaps)
+    MANIFEST.record_verdict(
+        "section1.no_overlapping_polygons",
+        overlaps["n_overlapping"] == 0,
+        f"{overlaps['n_overlapping']} overlapping of "
+        f"{overlaps['n_pairs_checked']} adjacent pairs",
+    )
+
+    if overlaps["n_overlapping"]:
+        raise ValueError(
+            f"{overlaps['n_overlapping']} pair(s) of supplied polygons overlap "
+            "with positive area. Overlapping hexagons make a point match more "
+            "than one cell, which duplicates service requests downstream. "
+            "Refusing to proceed on a tiling that is not a partition."
+        )
+
     # --- Validation against the reference file -------------------------------
     reference = load_reference(client)
     with timed("section1.reference_comparison", logger):
