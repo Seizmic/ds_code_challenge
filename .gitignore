@@ -10,6 +10,11 @@ ds_code_challenge_creds.json
 # --- Data ---
 # Inputs are downloaded at runtime and cached; outputs are regenerated.
 data/**
+
+# Alternate output trees created with --data-dir. The README suggests
+# ./runs/<name>, so without this, following our own instructions leaves
+# untracked clutter in the working tree.
+runs/
 !data/**/
 !data/**/.gitkeep
 *.csv.gz

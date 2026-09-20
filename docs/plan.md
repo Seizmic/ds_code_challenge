@@ -2,10 +2,11 @@
 
 > **Status: complete.** All five phases delivered. Results in [results.md](results.md).
 >
-> Clean-clone verification last re-run 2026-09-20 at `5d8e844`, after the
-> tie-break revision and the polygon overlap check: fresh clone from GitHub,
-> new venv, **118 tests pass**, full pipeline runs cold with no cached data in
-> **40.8s at exit code 0**, and no data payloads are committed.
+> Clean-clone verification last re-run 2026-09-20 at `7626a31`, after the path
+> centralisation: fresh clone from GitHub, new venv, **120 tests pass**, full
+> pipeline runs cold with no cached data in **41.4s at exit code 0**, outputs
+> land in the default `./data` tree, `--data-dir` redirects them without
+> touching the default, and no data payloads are committed.
 
 Budget: **~8 hours** (per the brief) against a deadline of **23:59 SAST, Tue 22 Sep 2026**.
 Today is Sun 20 Sep 2026, leaving roughly two calendar days.

@@ -37,7 +37,9 @@ automatically and cached under `data/raw/`, so reruns skip the network.
 ## Results
 
 Full generated detail in **[docs/results.md](docs/results.md)**, which is written by the
-pipeline from the run manifest so it cannot drift from what the code did.
+pipeline from the run manifest so it cannot drift from what the code did. It is committed so
+it can be read without running anything, and rewritten on every run - so running the pipeline
+will show `docs/results.md` as modified. That is expected, not a stray edit.
 
 | | Result |
 |---|---|
