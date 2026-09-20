@@ -130,11 +130,42 @@ check was worth adding.
 root cause of the C4 disagreements; measured the tie-break criterion and replaced it; added and
 tested the exact-tie case; added a collection-level polygon overlap check. See correction 7.
 
-**Also answered:** a question about a value of "AA" appearing instead of NULL. No such value was
-ever written or present - the classifier's null-token set contains `"na"` and `"n/a"`, easily
-misread. Worth stating plainly that those tokens are **defensive rather than observed**: the
-supplied data contains exactly one non-numeric coordinate value, the empty string. Unlike every
-threshold in the config, that token set is not calibrated against this dataset.
+**Also answered, then answered again correctly:** a question about a value of "AA" appearing
+instead of NULL, and whether it was in the input data.
+
+The AI's first answer assumed the candidate had misread `"na"` / `"n/a"` from the classifier's
+null-token set. The conclusion - not in the input data - was right, but the reasoning was wrong,
+and the candidate located the actual reference: **`pd.NA`**, from the earlier note that
+"comparing StringDtype columns yields NA (not False) when a value is null, so those 3 rows were
+silently excluded".
+
+The accurate answer is more interesting than the guessed one. `pd.NA` is pandas' missing-value
+scalar, and it **propagates through comparisons** rather than resolving to a boolean:
+
+```
+ours   : ['88ad360221fffff', <NA>,             '0']
+theirs : ['88ad360227fffff', '88ad361b51fffff', '0']
+agree  : [False,             <NA>,             True]   <- not False
+~agree : [True,              <NA>,             False]  <- still not True
+```
+
+Using `~agree` as a row selector therefore drops the NA row entirely, while `n_disagree`,
+computed as `len - n_agree`, still counts it. That is exactly how the mismatch buckets summed
+to 26 of 29 on the real data.
+
+So `pd.NA` is not a value *in* the input; it is a value pandas *produces* when a null takes part
+in a comparison. The supplied data contains exactly one non-numeric coordinate value: the empty
+string.
+
+Worth recording as a small instance of the same reflex the standing lesson describes. Asked
+about something that sounded wrong, the AI reached first for the explanation in which it had
+been right all along - that the candidate had misread a string literal - rather than for the
+possibility that it had written something confusing and the candidate was pointing straight at
+it. The candidate had to find the reference themselves.
+
+Separately, and still worth stating: the null-token set `{"", "nan", "none", "null", "na",
+"n/a"}` is **defensive rather than observed**. Unlike every threshold in the config, it is not
+calibrated against this dataset, which contains only empty strings.
 
 ---
 
