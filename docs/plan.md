@@ -1,6 +1,10 @@
 # Execution Plan
 
 > **Status: complete.** All five phases delivered. Results in [results.md](results.md).
+>
+> Clean-clone verification re-run 2026-09-20 after the requirements audit:
+> fresh clone from GitHub, new venv, 107 tests pass, full pipeline runs cold
+> in 42.5s at exit code 0, no data payloads committed.
 
 Budget: **~8 hours** (per the brief) against a deadline of **23:59 SAST, Tue 22 Sep 2026**.
 Today is Sun 20 Sep 2026, leaving roughly two calendar days.

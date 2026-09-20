@@ -7,8 +7,8 @@ number of tokens") and by the assessment brief.
 **Tool:** Claude Code (Anthropic), model `claude-opus-5`
 **Usage:** heavy. The AI drafted the documentation, wrote the pipeline code and the tests, and
 ran the analysis. It was directed and audited throughout rather than accepted as delivered.
-Five corrections are documented below; the three substantive ones were prompted by the
-candidate challenging a claim or an untested assumption, and each turned up a real defect.
+Six corrections are documented below; the four substantive ones were prompted by the candidate
+challenging a claim or an untested assumption, and each turned up a real defect.
 
 ---
 
@@ -21,7 +21,8 @@ candidate challenging a claim or an untested assumption, and each turned up a re
 | 3 | 2026-09-20 | Fork, Section 1, Section 2, tests | ~210k / ~48k |
 | 4 | 2026-09-20 | Data quality contract and assumption audit | ~95k / ~22k |
 | 5 | 2026-09-20 | Phase 4/5 reports, clean-clone verification, check coverage audit | ~120k / ~30k |
-| | | **Total** | **~550k / ~119k** |
+| 6 | 2026-09-20 | Requirements audit, axis-order enforcement, integration tests | ~85k / ~24k |
+| | | **Total** | **~635k / ~143k** |
 
 Figures are estimated from context size rather than exact client-reported counts.
 
@@ -101,14 +102,29 @@ records.
 
 ---
 
+### Session 6 - Requirements audit and axis ordering
+
+**Asked for:** "Please do a full audit of what was coded against the requirements. Double-check
+the code to ensure there are no gaps. Also, are the latitude and longitude variable of type
+geometry? If not, is it possible that we can get the latitude and longitude swapped in the input
+data, and do we have checks in place if this is the case?"
+
+**Did:** audited the implementation line by line against the literal wording of the upstream
+README; found and closed five gaps; implemented the three schema rules that had been declared
+but never enforced; added integration and axis-order test suites. Re-ran the clean-clone
+verification: 107 tests pass and the full pipeline runs cold from a fresh clone in 42.5s at exit
+code 0. See correction 6.
+
+---
+
 ## Corrections and improvements
 
 The brief requires at least one documented instance where AI output was corrected. There are
-five below, split by who caught them, because that distinction is the point of the section.
+six below, split by who caught them, because that distinction is the point of the section.
 
-**Candidate-driven (2, 3, 5)** - Naveen's questions caused these. Each began as a challenge to
-a claim the AI had made, or to an assumption it had left unexamined, and each turned up a real
-defect. These are the substantive ones.
+**Candidate-driven (2, 3, 5, 6)** - Naveen's questions caused these. Each began as a challenge
+to a claim the AI had made, or to an assumption it had left unexamined, and each turned up a
+real defect. These are the substantive ones.
 
 **AI-caught (1, 4)** - found by the tool mid-task. Recorded for completeness, but they do not
 satisfy the brief's requirement, and are labelled as such rather than quietly padding the list.
@@ -280,9 +296,61 @@ the exception raised, the artifact written, the log line emitted. Test count wen
 3. `R2_boundary_unique` turns out to be unreachable on any continuous tiling, since every
    interior boundary point touches at least two cells and routes to R3.
 
+### 6. Candidate-driven - documented requirements that were never implemented
+
+Naveen asked for a full audit of the code against the requirements, and separately whether
+latitude and longitude are a geometry type and what happens if they arrive swapped.
+
+Auditing against the **literal wording** of the upstream README rather than a remembered
+summary of it found five gaps. Four were real defects:
+
+1. **Five imports sat inside functions**, against an explicit instruction in the README:
+   "place `import` and `library()` commands at the top of your scripts". Checking the
+   dependency graph showed it is a clean DAG, so no circular import justified them. They were
+   defensive habit, not necessity.
+2. **No integration test existed**, though the README names "unit and even integration tests"
+   for Data Engineering candidates - and though Phase 5 of the plan the AI itself wrote listed
+   one.
+3. **`must_be_valid: true  # no self-intersection` was declared in the schema and never
+   enforced.** The `geometry_valid` score was only the minimum of the type, position-count and
+   closure rules, none of which detect a bow-tie. A self-intersecting hexagon scored as valid.
+4. **`rings: 1` and `axis_order: lon_lat` were likewise declared and never enforced** - comments
+   describing intent, presented in a configuration file as though they were checks.
+
+Dead configuration is worse than missing configuration. Anyone auditing `hex_schema.yaml` would
+reasonably have concluded self-intersection was covered. The file asserted a guarantee the code
+did not provide.
+
+**The integration test then earned itself within a minute.** Moving `import json` out of `run()`
+to satisfy gap 1 removed it without adding it at module top. **All 83 unit tests still passed** -
+not one of them calls `run()`. The first integration test failed with `NameError: name 'json' is
+not defined`, on a fault that would have broken the real pipeline on its next execution. The
+unit suite verified every rule in isolation and was blind to the module being unable to run.
+
+**On the latitude/longitude question.** They are two independent *text* columns, not a geometry
+type; nothing in the data binds them together or records which is which. The risk is sharpened
+by two libraries in this pipeline taking the pair in opposite orders - `shapely` wants
+`(longitude, latitude)`, `h3` wants `(latitude, longitude)` - so transposing either is a
+one-character edit that raises no error and returns a plausible answer. `tests/test_axis_order.py`
+now pins both conventions, asserts our own call sites, and verifies that swapped input is
+classified as `INVERTED` rather than merely out of range. One test matters more than the rest:
+it asserts the configured latitude and longitude ranges stay **disjoint**, since that property is
+what makes inversion detectable at all, and widening the bounds would silently remove the
+capability.
+
+**Changed:** imports to module top; `tests/test_integration.py` (9 tests) and
+`tests/test_axis_order.py` (11 tests); `geometry_simple`, `geometry_single_ring` and
+`axis_order` rules implemented; `coordinate_axis_order` added to the service request contract so
+a wholesale swap reports as inversion rather than as "longitude out of range". 83 tests to
+**107**.
+
+**One self-inflicted error along the way:** the YAML patch used `str.replace` without a count,
+and `  completion_after_creation:` is a substring of the four-space-indented weights entry, so
+the block was injected twice and broke the schema. The suite caught it immediately.
+
 ## Standing lesson
 
-Four of the five corrections share a root cause: **the AI validated against the data in front
+Four of the six corrections share one root cause: **the AI validated against the data in front
 of it and reported the result as a general property.** Clean data scored well, so the checks
 looked adequate; a rounded fixture still passed, so the test looked adequate; a published
 constant was close enough, so it went unchecked. In each case the output was confident and the
@@ -292,3 +360,16 @@ The pattern recurred even after it had been named. Correction 5 is correction 2 
 layer, and the fixture fault inside it repeats correction 4 exactly. Recognising a failure mode
 in retrospect did not stop the AI reproducing it; what caught it each time was the candidate
 asking a pointed question about a part of the system that looked fine.
+
+**Correction 6 exposed a second, distinct failure mode: writing a requirement down and treating
+that as having met it.** It happened twice. In `docs/discrepancies.md` B10 the AI wrote that the
+expected header should be asserted on load "so a future upstream rename fails loudly", then did
+not implement it - that gap became correction 2. In `docs/plan.md` Phase 5 it listed an
+integration test, then did not write one - that gap became correction 6. The schema file did the
+same thing in miniature, declaring `must_be_valid` and `axis_order` as configuration while no
+code read either.
+
+Documentation and intent are cheap to produce and read as progress. Both times, the written
+record made the work look more complete than it was, and the discrepancy was only visible to
+someone who went back and checked the code against the document rather than reading the
+document alone.
