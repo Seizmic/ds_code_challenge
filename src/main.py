@@ -11,7 +11,7 @@ import argparse
 import logging
 import sys
 
-from src import config, extract_hex, s3_io
+from src import config, extract_hex, s3_io, transform_join
 from src.logging_setup import MANIFEST, configure_logging, timed
 
 logger = logging.getLogger("src.main")
@@ -50,13 +50,14 @@ def main(argv: list[str] | None = None) -> int:
         with timed("pipeline.total", logger):
             client = s3_io.make_s3_client()
 
+            hex_features = None
             if args.section in {"1", "all"}:
                 logger.info("--- Section 1: Data Extraction ---")
-                extract_hex.run(client, run_baseline=args.baseline)
+                hex_features = extract_hex.run(client, run_baseline=args.baseline)["features"]
 
             if args.section in {"2", "all"}:
                 logger.info("--- Section 2: Initial Data Transformation ---")
-                logger.warning("Section 2 is not yet implemented.")
+                transform_join.run(client, hex_features=hex_features)
 
     except Exception as exc:  # noqa: BLE001 - top-level handler reports and exits
         logger.error("Pipeline FAILED: %s", exc, exc_info=True)
