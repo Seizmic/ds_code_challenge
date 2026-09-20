@@ -8,9 +8,12 @@ the cases where a one-to-many join would silently duplicate service requests.
 
 from __future__ import annotations
 
+import geopandas as gpd
 import h3
+import numpy as np
 import pandas as pd
 import pytest
+from shapely.geometry import Point
 
 from src.transform_join import (
     RULE_R1_INTERIOR,
@@ -115,7 +118,93 @@ class TestTiebreakDeterminism:
         assert row["candidate_indices"] and "|" in row["candidate_indices"]
         assert row["runner_up_index"] is not pd.NA
         # The margin is the diagnostic that says whether the tie-break mattered.
+        # Unsigned: the winner need not be the nearer centroid, because the
+        # library's own assignment takes precedence over centroid proximity.
         assert row["margin_m"] >= 0
+        assert row["chose_nearest_centroid"] in (True, False)
+
+
+class TestExactDistanceTie:
+    """What happens when two centroids are EXACTLY equidistant.
+
+    Not hypothetical: haversine depends on sin^2(dlon/2), and sin^2 is even, so
+    two centroids mirrored about a point at the same latitude yield
+    bit-identical distances. Criterion 2 cannot decide, and criterion 3 must.
+    """
+
+    def test_exact_tie_is_reachable_not_merely_close(self):
+        from src.quality_checks import haversine_metres
+
+        lat, lon, d = -33.9249, 18.4241, 0.005
+        west = haversine_metres(np.array([lat]), np.array([lon]),
+                                np.array([lat]), np.array([lon - d]))[0]
+        east = haversine_metres(np.array([lat]), np.array([lon]),
+                                np.array([lat]), np.array([lon + d]))[0]
+        assert west == east, "expected a bit-identical tie, not an approximate one"
+
+    def test_exact_tie_resolves_by_lexicographic_index(self):
+        from src.transform_join import _tiebreak
+
+        lat, lon, d = -33.9249, 18.4241, 0.005
+        candidates = pd.DataFrame(
+            {"h3_index": ["88ffffffffffffz", "88aaaaaaaaaaaaz"],
+             "centroid_lat": [lat, lat],
+             "centroid_lon": [lon + d, lon - d]},
+            index=[0, 0],
+        )
+        points = gpd.GeoDataFrame(
+            {"latitude": [lat], "longitude": [lon]},
+            geometry=[Point(lon, lat)], crs="EPSG:4326", index=[0],
+        )
+
+        out = _tiebreak(candidates, points, "latitude", "longitude")
+        row = out.iloc[0]
+
+        # Neither candidate is the library's own cell, and the distances are
+        # identical, so the only remaining discriminator is index order.
+        assert row["h3_index"] == min(candidates["h3_index"])
+        assert row["margin_m"] == 0.0
+        assert row["rule"] == RULE_R3_TIEBREAK
+
+    def test_exact_tie_is_stable_under_input_reordering(self):
+        """The whole point of criterion 3: order must not decide the outcome."""
+        from src.transform_join import _tiebreak
+
+        lat, lon, d = -33.9249, 18.4241, 0.005
+        rows = [
+            {"h3_index": "88ffffffffffffz", "centroid_lat": lat, "centroid_lon": lon + d},
+            {"h3_index": "88aaaaaaaaaaaaz", "centroid_lat": lat, "centroid_lon": lon - d},
+        ]
+        points = gpd.GeoDataFrame(
+            {"latitude": [lat], "longitude": [lon]},
+            geometry=[Point(lon, lat)], crs="EPSG:4326", index=[0],
+        )
+
+        forward = _tiebreak(pd.DataFrame(rows, index=[0, 0]), points,
+                            "latitude", "longitude").iloc[0]["h3_index"]
+        reverse = _tiebreak(pd.DataFrame(rows[::-1], index=[0, 0]), points,
+                            "latitude", "longitude").iloc[0]["h3_index"]
+        assert forward == reverse
+
+
+class TestTiebreakPrefersTheLibrary:
+    def test_library_cell_wins_over_a_nearer_centroid(self, hexes, shared_edge_midpoint,
+                                                       points_frame):
+        """Criterion 1 outranks criterion 2, which is the change that matters.
+
+        Measured on 4,000 sampled points, spherical nearest-centroid disagrees
+        with h3.latlng_to_cell for more than half of points within 1 m of a
+        boundary - the only regime the tie-break ever runs in. The library's
+        own assignment is definitional, so it takes precedence.
+        """
+        result = assign_hexagons_geometric(
+            points_frame([shared_edge_midpoint]), hexes
+        )
+        row = result.iloc[0]
+        assert row["rule"] == RULE_R3_TIEBREAK
+
+        lat, lon = shared_edge_midpoint
+        assert row["h3_index"] == h3.latlng_to_cell(lat, lon, 8)
 
 
 class TestNoMatch:

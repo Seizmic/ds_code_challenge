@@ -311,3 +311,4 @@ class TestAmbiguousSidecarIsWritten:
             assert row["runner_up_index"] is not pd.NA
             # margin_m is the diagnostic that says whether the call was close.
             assert row["margin_m"] >= 0
+            assert row["chose_nearest_centroid"] in (True, False)

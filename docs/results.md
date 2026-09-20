@@ -4,7 +4,7 @@
 figure below is read from the manifest of the run that produced it, so this
 document cannot drift from what the code actually did.
 
-Run started `2026-09-20T18:49:14+0200` on Python `3.14.3`.
+Run started `2026-09-20T19:40:23+0200` on Python `3.14.3`.
 
 ---
 
@@ -18,7 +18,7 @@ Run started `2026-09-20T18:49:14+0200` on Python `3.14.3`.
 | Bytes scanned | 108,254,980 |
 | Bytes returned | 1,946,734 |
 | **Transfer reduction** | **98.202%** |
-| Extraction time | 3.242s |
+| Extraction time | 3.085s |
 
 ### Validation against `city-hex-polygons-8.geojson`
 
@@ -73,9 +73,9 @@ vertex cases explicitly.
 ### Efficiency
 
 - Unique coordinate pairs: **460,413** (63.1% of geolocated rows, 1.58x less join work)
-- Geometric join: 0.770s
-- H3 library assignment: 0.391s
-- **Total pipeline: 33.3s**
+- Geometric join: 1.196s
+- H3 library assignment: 0.706s
+- **Total pipeline: 41.3s**
 
 ## Method comparison - geometric vs H3 library
 
@@ -84,7 +84,7 @@ Agreement over 460,413 unique coordinate pairs: **99.998697%**
 | Category | Count | Meaning |
 |---|---|---|
 | `C2b_outside_coverage` | 2 | Point lies beyond the supplied tiling altogether. |
-| `C4_adjacent_cell` | 4 | Both valid and adjacent. Sub-metre boundary drift. |
+| `C4_adjacent_cell` | 4 | Both valid and adjacent. Point sits millimetres from the shared edge. |
 
 **No non-adjacent disagreements.** Every difference is either sub-metre
 boundary drift or a point outside coverage; none indicates an axis, CRS

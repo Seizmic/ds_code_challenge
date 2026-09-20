@@ -159,7 +159,7 @@ def generate(manifest: dict[str, Any], path: Path = RESULTS_PATH) -> Path:
             "C2_coverage_gap": "Library's cell exists in the file but the join matched nothing. A hole.",
             "C2b_outside_coverage": "Point lies beyond the supplied tiling altogether.",
             "C3_out_of_tiling": "Join matched, but the library's cell is absent from the file.",
-            "C4_adjacent_cell": "Both valid and adjacent. Sub-metre boundary drift.",
+            "C4_adjacent_cell": "Both valid and adjacent. Point sits millimetres from the shared edge.",
             "C5_non_adjacent": "Both valid, NOT adjacent. Not a rounding artifact - investigate.",
         }
         for name, count in sorted(categories.items()):

@@ -391,3 +391,95 @@ defined` - a fault that would have broken the real pipeline on its next run.
 That is the case for integration tests stated better than any argument: the
 unit suite verified every rule in isolation and was blind to the module being
 unable to execute.
+
+---
+
+## I. Root cause of the C4 adjacent-cell disagreements (2026-09-20)
+
+Earlier commits described these as the supplied polygon boundaries "drifting
+slightly from the true H3 cell boundaries". **That wording was wrong and is
+corrected here.**
+
+### What was actually measured
+
+The supplied polygons are **not** a rounded rendering of H3's geometry. Comparing
+`city-hex-polygons-8.geojson` against `h3.cell_to_boundary()` for the disagreeing
+cell:
+
+```
+vertices in supplied polygon : 6
+vertices from h3             : 6
+max per-vertex deviation     : 0.0000 m  (identical to within 1e-6)
+```
+
+The vertices are exact. The difference lies **between** them: a GeoJSON polygon
+joins its vertices with straight lines in longitude/latitude space, whereas an H3
+cell edge follows a geodesic in the library's icosahedral projection. The two
+curves coincide at every vertex and separate very slightly in between.
+
+Demonstration: the exact straight-line midpoint of the seam shared by
+`88ad360221fffff` and `88ad360227fffff` is assigned by H3 to the second cell,
+while the planar polygon places it in the first. Even the geometric centre of
+the shared edge disagrees.
+
+### How close are the affected points?
+
+All four disagreeing coordinate pairs sit **within 2 mm** of a boundary:
+
+| Coordinate | Distance to edge |
+|---|---|
+| (-33.87138874, 18.51291184) | **0.1289 mm** |
+| (-34.01534140, 18.61084840) | 0.6656 mm |
+| (-34.05500391, 18.81786608) | 1.9400 mm |
+| (-33.81938352, 18.53545445) | 1.9891 mm |
+
+For context, of 460,413 unique coordinate pairs only **2** lie within 1 mm of a
+boundary and **23** within 1 cm. These are not ordinary near-edge points; they
+are the extreme tail.
+
+### Why the tie-break never ran on them
+
+Each resolved as `R1_interior`. The point is a fraction of a millimetre *inside*
+the drawn polygon, so `within` returns `True` and the rule that exists to handle
+boundary ambiguity is never consulted. They are not tie-break failures - they are
+cases the tie-break was never offered.
+
+### J. The tie-break criterion was measurably wrong
+
+Investigating the above exposed a defect in the rule itself. `docs/decisions.md`
+justified nearest-centroid on the grounds that it "approximates what
+`h3.latlng_to_cell` itself does". Measured against 4,000 points sampled from
+known cells:
+
+| Distance from cell boundary | Nearest-centroid disagrees with H3 |
+|---|---|
+| 0 - 1 m | **55.6%** |
+| 1 - 5 m | 18.2% |
+| 5 - 10 m | 4.0% |
+| > 10 m | 0.0% |
+
+Overall agreement is 99.75%, which sounds reassuring and is misleading: **the
+entire disagreement is concentrated within 10 m of a boundary, and the tie-break
+runs only on points that are ON a boundary.** In the sole regime where the rule
+applies, it was close to a coin flip.
+
+H3 cell membership is defined by the library's icosahedral projection, not by
+spherical proximity to a centre, so the approximation was unnecessary in the
+first place. The rule is now:
+
+1. the cell `h3.latlng_to_cell` assigns, when it is among the candidates;
+2. otherwise nearest centroid;
+3. on an exact tie, lexicographically smallest index.
+
+The library only *orders* the candidates; the geometric join still decides which
+polygons are eligible.
+
+**Exact ties are reachable, not hypothetical.** Haversine depends on
+`sin^2(dlon/2)` and `sin^2` is even, so two centroids mirrored about a point at
+the same latitude give bit-identical distances. Criterion 3 exists for that case
+and is tested with a constructed example; `margin_m` is `0.0` there, which flags
+it as a genuine coin-flip in the side-car.
+
+`margin_m` is now unsigned, and a new `chose_nearest_centroid` column records
+whether criteria 1 and 2 agreed. A `False` marks precisely the near-boundary
+case where nearest-centroid was measured to be unreliable.
