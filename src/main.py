@@ -11,7 +11,7 @@ import argparse
 import logging
 import sys
 
-from src import config, extract_hex, s3_io, transform_join
+from src import config, extract_hex, reporting, s3_io, transform_join
 from src.logging_setup import MANIFEST, configure_logging, timed
 
 logger = logging.getLogger("src.main")
@@ -75,6 +75,15 @@ def main(argv: list[str] | None = None) -> int:
 
     manifest_path = MANIFEST.write()
     logger.info("Run manifest written to %s", manifest_path)
+
+    # The results document is generated from the manifest rather than written
+    # by hand, so it cannot drift from what the run actually did.
+    if args.section == "all" and exit_code == 0:
+        try:
+            reporting.generate(MANIFEST.data)
+        except Exception as exc:  # noqa: BLE001 - reporting must not fail the run
+            logger.warning("Could not generate the results document: %s", exc)
+
     return exit_code
 
 

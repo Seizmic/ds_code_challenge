@@ -24,7 +24,7 @@ import numpy as np
 import pandas as pd
 from shapely.geometry import Polygon
 
-from src import config, quality_checks, sr_validation
+from src import config, coverage, quality_checks, sr_validation
 from src.logging_setup import MANIFEST, timed
 from src.quality_checks import CoordClass
 
@@ -649,6 +649,18 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
             f"{thresholds['class_d_malformed']}. This indicates a defect in the "
             "quality gate, not a data problem."
         )
+
+    # --- Coverage analysis ---------------------------------------------------
+    with timed("section2.coverage_analysis", logger):
+        coverage_report = coverage.analyse(valid_hexes)
+    coverage.log_report(coverage_report)
+    MANIFEST.record_metric("section2.coverage", coverage_report)
+    MANIFEST.record_verdict(
+        "section2.no_enclosed_holes",
+        coverage_report["n_fully_enclosed_holes"] == 0,
+        f"{coverage_report['n_interior_holes']} near-enclosed gap(s), "
+        f"{coverage_report['n_fully_enclosed_holes']} fully enclosed",
+    )
 
     # --- Validate against the reference dataset ------------------------------
     with timed("section2.reference_validation", logger):

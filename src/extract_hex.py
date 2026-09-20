@@ -34,15 +34,27 @@ def extract_via_naive_download(client) -> list[dict[str, Any]]:
 
     Exists purely so the S3 Select saving is a measured comparison rather than
     an assertion. Off by default because it transfers 108 MB.
+
+    Deliberately BYPASSES the download cache. The point of this baseline is to
+    measure what the naive approach costs, which is dominated by transferring
+    108 MB. Reading a warm cache from local disk measures nothing of the sort,
+    and on a second run made S3 Select look 0.5x "faster" than a baseline that
+    never touched the network. A cached baseline is not a baseline.
     """
+    import tempfile
+
     with timed("section1.naive_baseline", logger):
-        path = s3_io.download_cached(client, config.KEY_HEX_8_10)
-        with path.open("r", encoding="utf-8") as handle:
-            collection = json.load(handle)
-        features = [
-            f for f in collection["features"]
-            if (f.get("properties") or {}).get("resolution") == config.TARGET_RESOLUTION
-        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / config.KEY_HEX_8_10
+            logger.info("Baseline: downloading the full object (cache bypassed)...")
+            client.download_file(config.S3_BUCKET, config.KEY_HEX_8_10, str(path))
+            with path.open("r", encoding="utf-8") as handle:
+                collection = json.load(handle)
+            features = [
+                f for f in collection["features"]
+                if (f.get("properties") or {}).get("resolution")
+                == config.TARGET_RESOLUTION
+            ]
     logger.info("Naive baseline extracted %d features from the full document",
                 len(features))
     return features
