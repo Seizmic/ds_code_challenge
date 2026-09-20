@@ -1,5 +1,7 @@
 # Execution Plan
 
+> **Status: complete.** All five phases delivered. Results in [results.md](results.md).
+
 Budget: **~8 hours** (per the brief) against a deadline of **23:59 SAST, Tue 22 Sep 2026**.
 Today is Sun 20 Sep 2026, leaving roughly two calendar days.
 

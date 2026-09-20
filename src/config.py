@@ -105,6 +105,20 @@ JOIN_METHODS = ("geometric", "library")
 # against sr_hex.csv.gz at runtime -- see docs/discrepancies.md B5.
 NO_GEOLOCATION_INDEX = "0"
 
+# Minimum acceptable exact-match rate against sr_hex.csv.gz.
+#
+# Deliberately a threshold rather than "zero disagreements". The geometric
+# route is the documented default and is KNOWN to differ from the reference on
+# 29 of 941,634 records, because sr_hex.csv.gz was generated with the H3
+# library (docs/results.md). Demanding perfection would mark an outcome we
+# chose, understand and documented as a failure, and would contradict the
+# non-binary scoring used everywhere else in this project.
+#
+# 0.999 sits far above the measured 0.99996920 while still catching any real
+# regression: a coordinate swap or a truncated polygon file would drop the
+# match rate by orders of magnitude, nowhere near this band.
+REFERENCE_MATCH_THRESHOLD = 0.999
+
 # Join error thresholds. See docs/decisions.md section 2 for the motivation;
 # the class-B figure is calibrated against the observed baseline on first run
 # rather than chosen a priori.

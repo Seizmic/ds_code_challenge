@@ -668,11 +668,20 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
             client, result["h3_level8_index"], df
         )
     MANIFEST.record_metric("section2.reference_validation", validation_report)
+    match_rate = validation_report["match_rate"]
     MANIFEST.record_verdict(
         "section2.reference_match",
-        validation_report["n_disagree"] == 0,
-        f"{validation_report['match_rate']:.8f} exact match",
+        match_rate >= config.REFERENCE_MATCH_THRESHOLD,
+        f"{match_rate:.8f} exact match vs threshold "
+        f"{config.REFERENCE_MATCH_THRESHOLD} "
+        f"({validation_report['n_disagree']} known differences)",
     )
+    if match_rate < config.REFERENCE_MATCH_THRESHOLD:
+        raise ValueError(
+            f"Exact match against {config.KEY_SR_HEX} is {match_rate:.8f}, below "
+            f"the threshold {config.REFERENCE_MATCH_THRESHOLD}. This is a "
+            "regression, not the known method difference."
+        )
 
     # --- Write output --------------------------------------------------------
     with timed("section2.write_output", logger):

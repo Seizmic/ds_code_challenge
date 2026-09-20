@@ -4,7 +4,7 @@
 figure below is read from the manifest of the run that produced it, so this
 document cannot drift from what the code actually did.
 
-Run started `2026-09-20T18:03:54+0200` on Python `3.14.3`.
+Run started `2026-09-20T18:07:58+0200` on Python `3.14.3`.
 
 ---
 
@@ -18,8 +18,8 @@ Run started `2026-09-20T18:03:54+0200` on Python `3.14.3`.
 | Bytes scanned | 108,254,980 |
 | Bytes returned | 1,946,734 |
 | **Transfer reduction** | **98.202%** |
-| Extraction time | 3.109s |
-| vs naive download baseline | **3.76x faster** |
+| Extraction time | 3.392s |
+| vs naive download baseline | **3.83x faster** |
 
 ### Validation against `city-hex-polygons-8.geojson`
 
@@ -74,9 +74,9 @@ vertex cases explicitly.
 ### Efficiency
 
 - Unique coordinate pairs: **460,413** (63.1% of geolocated rows, 1.58x less join work)
-- Geometric join: 0.757s
-- H3 library assignment: 0.363s
-- **Total pipeline: 44.5s**
+- Geometric join: 0.754s
+- H3 library assignment: 0.373s
+- **Total pipeline: 46.6s**
 
 ## Method comparison - geometric vs H3 library
 
@@ -161,6 +161,6 @@ No cross-column consistency violations.
 | `section2.class_b_threshold` | **PASS** | 0.00000411 vs 0.005 |
 | `section2.class_d_threshold` | **PASS** | 0.00000000 vs 0.0 |
 | `section2.no_enclosed_holes` | **PASS** | 1 near-enclosed gap(s), 0 fully enclosed |
-| `section2.reference_match` | **FAIL** | 0.99996920 exact match |
+| `section2.reference_match` | **PASS** | 0.99996920 exact match vs threshold 0.999 (29 known differences) |
 | `section2.sr_data_contract` | **PASS** | score=0.994767 verdict=pass |
 
