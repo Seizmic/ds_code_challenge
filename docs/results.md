@@ -4,7 +4,7 @@
 figure below is read from the manifest of the run that produced it, so this
 document cannot drift from what the code actually did.
 
-Run started `2026-09-20T18:07:58+0200` on Python `3.14.3`.
+Run started `2026-09-20T18:28:57+0200` on Python `3.14.3`.
 
 ---
 
@@ -18,8 +18,7 @@ Run started `2026-09-20T18:07:58+0200` on Python `3.14.3`.
 | Bytes scanned | 108,254,980 |
 | Bytes returned | 1,946,734 |
 | **Transfer reduction** | **98.202%** |
-| Extraction time | 3.392s |
-| vs naive download baseline | **3.83x faster** |
+| Extraction time | 2.920s |
 
 ### Validation against `city-hex-polygons-8.geojson`
 
@@ -74,9 +73,9 @@ vertex cases explicitly.
 ### Efficiency
 
 - Unique coordinate pairs: **460,413** (63.1% of geolocated rows, 1.58x less join work)
-- Geometric join: 0.754s
-- H3 library assignment: 0.373s
-- **Total pipeline: 46.6s**
+- Geometric join: 0.779s
+- H3 library assignment: 0.385s
+- **Total pipeline: 33.2s**
 
 ## Method comparison - geometric vs H3 library
 
@@ -155,7 +154,6 @@ No cross-column consistency violations.
 | Check | Result | Detail |
 |---|---|---|
 | `pipeline` | **PASS** | completed |
-| `section1.baseline_agrees_with_select` | **PASS** | select=3832 baseline=3832 |
 | `section1.reference_match` | **PASS** | 3832 common of 3832 reference features |
 | `section1.schema_conformance` | **PASS** | score=1.0 verdict=pass |
 | `section2.class_b_threshold` | **PASS** | 0.00000411 vs 0.005 |

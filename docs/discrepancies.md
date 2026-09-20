@@ -262,3 +262,68 @@ which surfaces it as a **coverage finding**. Tightening the box would reclassify
 it as `OUT_OF_BOUNDS` and silently discard exactly the signal worth having.
 
 Three real records do precisely this - see the `C2b_outside_coverage` category.
+
+---
+
+## G. Check coverage audit (2026-09-20)
+
+Prompted by the question: *does the supplied data actually trigger all of the
+checks?* It does not.
+
+### Before
+
+| Group | Exercised by real data | Dormant |
+|---|---|---|
+| Coordinate classes | 2 of 7 | `partial`, `inverted`, `null_island`, `out_of_bounds`, `unparseable` |
+| Assignment rules | 3 of 6 | `R2_boundary_unique`, `R3_tiebreak`, `invalid_coordinates` |
+| Disagreement categories | 2 of 6 | `C1`, `C2`, `C3`, `C5` |
+| Hexagon conformance rules | **0 of 12** | all |
+| Service request contract rules | 4 of 13 | all range, pattern and uniqueness rules |
+| Consistency violations | **0 of 3** | all |
+| Coverage hole detection | **0 of 1** | fully-enclosed hole |
+| **Total** | **11 of 48 (23%)** | **37 of 48 (77%)** |
+
+`src/validation.py` - the twelve-rule conformance scorer that is Section 1's
+headline deliverable - additionally had **no tests at all**. It scores 1.000000
+on the supplied data and had never been demonstrated capable of returning
+anything else. A scorer that has only ever returned 1.0 is indistinguishable
+from `return 1.0`.
+
+### The problem
+
+A check that has never fired is indistinguishable from a check that is broken.
+The pipeline reported healthy numbers on clean data while three quarters of its
+logic, including every error and warning path, had never executed once.
+
+### After
+
+`tests/synthetic.py` builds inputs the real data does not contain - corrupted
+hexagon features, frames containing every coordinate class, points on shared
+edges and vertices, timestamps inverted by a month, columns emptied entirely.
+`tests/test_hex_validation.py` and `tests/test_dormant_paths.py` drive every
+remaining path and assert on what an operator would actually see: the rule that
+drops, the exception raised, the artifact written, the log line emitted.
+
+**83 tests. Every one of the 48 checks is now exercised by data or by test.**
+
+### Two findings from writing them
+
+**G1 - `centroid_within_polygon` cannot detect a consistent axis inversion.**
+When both the ring and the centroid are swapped, the feature stays internally
+coherent: the centroid still sits inside its own polygon in the swapped space.
+Only the bounds rules catch it, and they do so reliably because Cape Town's
+latitude and longitude ranges are disjoint and opposite in sign. An
+*inconsistent* inversion, where only the geometry is swapped, is caught
+topologically. Both shapes now have their own test, and the limitation is
+asserted explicitly rather than left as an assumption.
+
+**G2 - `R2_boundary_unique` is unreachable on any continuous tiling.** Every
+interior boundary point touches at least two cells and therefore routes to R3.
+R2 requires a boundary point with exactly one candidate, which only occurs at
+the edge of the covered set. It is tested against a single-cell fixture.
+
+Note also that a straight-line midpoint between two exact H3 vertices does not
+lie exactly on the polygon edge once curvature is accounted for. On an interior
+edge it lands inside one of the two cells; on an outer rim it lands outside
+altogether, producing R4. Fixtures for boundary cases therefore use exact
+vertices rather than derived midpoints wherever the distinction matters.
