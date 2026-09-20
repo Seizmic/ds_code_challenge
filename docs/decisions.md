@@ -41,15 +41,37 @@ Applied in strict order. Every record resolves to exactly one outcome.
 
 **R3 tie-break, in order:**
 
-1. **Nearest cell centroid** (great-circle distance from point to candidate centroid).
-2. If still tied within `1e-9`, the **lexicographically smallest H3 index string**.
+1. The cell **`h3.latlng_to_cell` itself assigns**, when it is among the candidates.
+2. Otherwise the **nearest cell centroid** by great-circle distance.
+3. On an **exact** distance tie, the **lexicographically smallest H3 index string**.
 
-**Why nearest-centroid.** It is not arbitrary. H3's own `latLngToCell` assigns a point to the
-cell whose centre is nearest in the icosahedral gnomonic projection, so nearest-centroid is the
-closest available approximation to H3's canonical answer - meaning the tie-break agrees with the
-library we validate against, rather than fighting it. Criterion 2 exists purely to guarantee
-determinism: the result must not depend on GeoJSON feature order, thread scheduling, or platform
-floating-point behaviour. The same input must always produce the same output.
+**Revised 2026-09-20 after measurement.** This rule originally led with nearest-centroid,
+justified on the grounds that it approximates what H3 does internally. That justification did
+not survive testing. Sampling 4,000 points against the cell H3 assigns them to:
+
+| Distance from boundary | Nearest-centroid disagrees with H3 |
+|---|---|
+| 0 - 1 m | **55.6%** |
+| 1 - 5 m | 18.2% |
+| 5 - 10 m | 4.0% |
+| > 10 m | 0.0% |
+
+Overall agreement is 99.75%, which reads well and hides the problem: the disagreement is
+entirely concentrated near boundaries, and **the tie-break only ever runs on points that are on
+a boundary**. In its sole operating regime the criterion was close to a coin flip. The
+reassuring headline number was measuring the regime where the rule never applies.
+
+H3 cell membership is defined by the library's icosahedral projection, not by spherical
+proximity to a centre, so the approximation was never necessary. Criterion 1 now asks the
+library directly, constrained to the candidate set - the geometric join still decides which
+polygons are eligible, and the library only orders them.
+
+Criterion 3 guarantees determinism: the result must not depend on feature order, thread
+scheduling or platform floating-point behaviour. **Exact ties are reachable, not theoretical** -
+haversine depends on `sin^2(dlon/2)` and `sin^2` is even, so two centroids mirrored about a
+point at the same latitude produce bit-identical distances. That case is constructed and tested
+directly, and `margin_m` is `0.0` for it, which flags it in the side-car as a genuine coin-flip
+rather than a close call.
 
 ### Recording the occurrences - a proposal beyond logging
 
