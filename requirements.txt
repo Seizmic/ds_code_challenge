@@ -1,0 +1,31 @@
+# Pinned exactly so the assessors resolve the same versions this was tested against.
+# Developed on Python 3.14.3; requires Python >= 3.11.
+#
+# Every compiled dependency below publishes a cp314 wheel, so nothing builds from
+# source. Verified against PyPI 2026-09-20.
+
+# --- AWS ---
+# B1 in docs/discrepancies.md: S3 Select is closed to new AWS customers since
+# July 2024. Pinned deliberately -- a future boto3 may drop select_object_content.
+boto3==1.43.98
+botocore==1.43.98
+
+# --- Data ---
+pandas==3.0.6
+numpy==2.5.3
+pyarrow==25.0.1          # multithreaded CSV reader; much faster than the pandas C engine
+
+# --- Spatial ---
+geopandas==1.1.4
+shapely==2.1.2           # 2.x: vectorised predicates + STRtree, required for the join
+h3==4.5.0                # note: 4.x renamed the API (geo_to_h3 -> latlng_to_cell)
+pyproj==3.8.0
+
+# --- Config & validation ---
+PyYAML==6.0.3
+
+# --- HTTP (boundary download for the coverage check, D4) ---
+requests==2.34.2
+
+# --- Testing ---
+pytest==9.1.1

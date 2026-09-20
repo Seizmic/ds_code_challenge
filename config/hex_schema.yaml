@@ -1,0 +1,142 @@
+# =============================================================================
+# Target schema for the H3 resolution-8 hexagon dataset
+# =============================================================================
+# Section 1 requires: "Explicitly capture the desired schema used to compute
+# this conformance score in a standalone configuration or documentation file."
+# This is that file. It is the single source of truth for both the extraction
+# contract and the conformance score -- the validator reads it rather than
+# hard-coding rules, so changing an expectation means editing this file only.
+#
+# Derived from direct inspection of the source objects on 2026-09-20
+# (docs/discrepancies.md section E), not from assumption.
+# =============================================================================
+
+dataset:
+  name: city-hex-polygons-8
+  description: >
+    H3 spatial index polygons at resolution 8 covering the City of Cape Town,
+    extracted from city-hex-polygons-8-10.geojson via AWS S3 Select and
+    validated against city-hex-polygons-8.geojson.
+  format: GeoJSON FeatureCollection
+  crs: urn:ogc:def:crs:OGC:1.3:CRS84   # WGS84, explicit longitude-latitude order
+
+# -----------------------------------------------------------------------------
+# Known asymmetry between source and reference -- see discrepancies.md E2
+# -----------------------------------------------------------------------------
+# The extraction source carries a `resolution` property; the reference file does
+# NOT. Records are therefore not field-identical even when they describe the same
+# hexagon. Comparison runs on `compare_properties` only; `resolution` is treated
+# as extraction-only provenance. Without this, a correct extraction looks broken.
+comparison:
+  key: index
+  compare_properties: [index, centroid_lat, centroid_lon]
+  compare_geometry: true
+  # Coordinates were byte-identical across both files in the sampled features,
+  # so exact comparison is attempted first and this tolerance is the fallback.
+  coordinate_tolerance_deg: 1.0e-9
+  extraction_only_properties: [resolution]
+
+# -----------------------------------------------------------------------------
+# Feature-level schema
+# -----------------------------------------------------------------------------
+properties:
+  index:
+    type: string
+    required: true
+    # H3 resolution-8 cell: 15 hex chars. Res-8 indices begin '88' and end 'fffff'.
+    pattern: '^88[0-9a-f]{8}fffff$'
+    unique: true
+    description: H3 cell index
+
+  centroid_lat:
+    type: number
+    required: true
+    min: -34.40
+    max: -33.40
+    description: Cell centroid latitude (negative - southern hemisphere)
+
+  centroid_lon:
+    type: number
+    required: true
+    min: 18.20
+    max: 19.10
+    description: Cell centroid longitude (positive - east of Greenwich)
+
+  resolution:
+    type: integer
+    required: false          # absent from the reference file; see `comparison`
+    equals: 8
+    description: H3 resolution level
+
+geometry:
+  type: Polygon
+  rings: 1                   # no holes
+  # A closed H3 hexagon has 7 positions: 6 vertices, first repeated as last.
+  # Pentagons exist in the H3 grid but none fall near Cape Town.
+  positions: 7
+  closed: true               # first position == last position
+  must_be_valid: true        # no self-intersection
+  axis_order: lon_lat        # RFC 7946. Guards against the inversion check in D2.
+  bounds:
+    lon: [18.20, 19.10]
+    lat: [-34.40, -33.40]
+
+# -----------------------------------------------------------------------------
+# Collection-level expectations
+# -----------------------------------------------------------------------------
+collection:
+  # Order-of-magnitude sanity only, NOT a precise expectation. CoCT is ~2,446 km2;
+  # an H3 res-8 cell averages ~0.737 km2, implying ~3,300 cells plus an edge
+  # margin where cells straddle the boundary. Deliberately wide -- this catches a
+  # catastrophically truncated extraction, not a handful of missing cells.
+  min_features: 2500
+  max_features: 5000
+  centroid_within_own_polygon: true
+
+# -----------------------------------------------------------------------------
+# Conformance scoring
+# -----------------------------------------------------------------------------
+# Non-binary in two senses, as the challenge asks:
+#   1. Each rule scores the FRACTION of features satisfying it, in [0, 1] --
+#      not a pass/fail flag.
+#   2. The overall score is the weighted mean of rule scores, so a rule's
+#      influence reflects how much it actually matters.
+# Weights are relative and normalised at runtime; they need not sum to 1.
+scoring:
+  weights:
+    # Structural integrity -- a failure here means the extraction is broken.
+    index_present: 3.0
+    index_pattern: 3.0
+    index_unique: 3.0
+    geometry_valid: 3.0
+
+    # Geometric correctness -- catches axis inversion and CRS errors.
+    geometry_type: 2.0
+    geometry_positions: 2.0
+    geometry_closed: 2.0
+    coordinates_in_bounds: 2.0
+
+    # Attribute correctness.
+    centroid_present: 1.5
+    centroid_in_bounds: 1.5
+    centroid_within_polygon: 1.0
+    resolution_correct: 1.0
+
+  thresholds:
+    # Non-binary threshold: three bands rather than a single cutoff, so a
+    # marginal result is visible instead of being rounded to pass or fail.
+    pass: 0.99      # >= 0.99 -> accept
+    warn: 0.95      # [0.95, 0.99) -> accept, log WARNING, list failing rules
+                    # < 0.95 -> fail the pipeline
+
+  # Rationale for 0.99: these polygons are machine-generated by the H3 library,
+  # not human-entered, so the legitimate defect rate should be ~0. A threshold
+  # below 1.0 exists only to tolerate floating-point edge cases at the bounds
+  # (a centroid sitting exactly on a limit), not real schema violations. The
+  # warn band makes a slow drift in quality visible before it trips the failure.
+  #
+  # Any rule scoring < 1.0 is always logged individually with example indices,
+  # whatever the aggregate score -- an aggregate can hide a small systematic
+  # fault behind a large number of passing features.
+  report_failing_rules: true
+  max_examples_per_rule: 5

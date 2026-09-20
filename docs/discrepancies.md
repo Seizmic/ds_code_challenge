@@ -37,6 +37,8 @@ Status key: `OPEN` needs a decision · `RESOLVED` decided · `UNVERIFIED` needs 
 | B7 | Low | "12 months of service request data" is undated. Section 4 references "the first 6 months of 2020"; the objects were last modified 2022-06-21. | The actual date window is unstated and must be measured, never assumed. | Report observed min/max creation dates in the data-quality output. |
 | B8 | Low | The repo carries a stale `master` branch alongside the default `main`. | Risk of forking or cloning the wrong ref. | Verified: the `master` and `main` READMEs are **byte-identical** today. Fork from `main`. |
 | B9 | Info | README: "Be sure to 'watch' this repo for changes - we may push bugfixes." | Upstream could change mid-window. | Pin our fork to `48907f2` and re-check upstream immediately before submitting. |
+| B10 | Medium | **Column names differ in case from the spec.** Section 2 says "where the `Latitude` and `Longitude` fields are empty". The actual columns are lowercase `latitude` and `longitude`. | Code written literally against the README raises `KeyError`. | Use the real lowercase names; assert the expected header on load so a future upstream rename fails loudly rather than silently. **CONFIRMED 2026-09-20.** |
+| B11 | Medium | **`sr_hex.csv.gz` is not purely additive over `sr.csv.gz`.** The README says it "contains the same data as `sr.csv` as well as a column `h3_level8_index`". In fact `sr.csv.gz` carries a leading **unnamed index column** (a pandas `to_csv(index=True)` artifact) which `sr_hex.csv.gz` does **not**. So a column was dropped as well as added. | Any code assuming a pure superset mis-aligns columns; naive `read_csv` yields a junk `Unnamed: 0` column. | Read `sr.csv.gz` with `index_col=0`. Section 2 uses `sr_hex.csv.gz` as the reference, so impact is limited, but the asymmetry is worth knowing. **CONFIRMED 2026-09-20.** |
 
 ---
 
@@ -119,3 +121,96 @@ Four independent angles, strongest first:
 4. **Order-of-magnitude sanity.** H3 resolution-8 cells average approximately 0.737 km squared; CoCT covers approximately 2,446 km squared, implying roughly **3,300 cells** plus an edge margin. The 1.97 MB file size is broadly consistent with that count. *This is an a-priori estimate to be confirmed, not a measurement.*
 
 Dependency and risk: angle (1) needs the boundary from the CoCT open-data portal, whose reliability the upstream README itself warns about. Mitigation: retry with backoff, and cache the boundary into the repo as a fallback so the pipeline still runs end to end.
+
+---
+
+## E. Phase 1 reconnaissance findings (2026-09-20)
+
+Established by HTTP **range requests** only - a few KB of each object, never the full 108 MB.
+These settle the two unknowns that gated the Section 1 design.
+
+### E1. `city-hex-polygons-8-10.geojson` carries an explicit `resolution` property - RESOLVED
+
+```json
+{ "type": "Feature",
+  "properties": { "index": "88ad361801fffff",
+                  "centroid_lat": -33.859427322761434,
+                  "centroid_lon": 18.677843311941835,
+                  "resolution": 8 },
+  "geometry": { "type": "Polygon", "coordinates": [ [ [ 18.6811898997334, -33.863302790817968 ], ... ] ] } }
+```
+
+Resolution does **not** have to be inferred from the H3 index. The S3 Select predicate is a
+direct `WHERE s.properties.resolution = 8`.
+
+### E2. The reference file has a *different* property schema - IMPORTANT
+
+`city-hex-polygons-8.geojson` features carry **no `resolution` property**:
+
+```json
+"properties": { "index": "88ad361801fffff", "centroid_lat": -33.859427322761434, "centroid_lon": 18.677843311941835 }
+```
+
+The file also has a top-level `"name": "city-hex-polygons-8"` member that the 8-10 file lacks.
+
+**Consequence:** the records S3 Select returns are **not** field-identical to the reference,
+even when both describe the same hexagon. A naive whole-record equality check between
+extraction and reference **will fail**, and would look like a bug in the extraction.
+
+Validation must therefore compare on the **intersection** of properties (`index`,
+`centroid_lat`, `centroid_lon`, geometry), and treat `resolution` as extraction-only
+provenance. This is recorded in `config/hex_schema.yaml` so the asymmetry is explicit rather
+than buried in a comparison function.
+
+Encouraging sign: for the features inspected, `index`, both centroids and every coordinate are
+**character-for-character identical** across the two files, and feature ordering matches. Exact
+comparison should be viable without a geometric tolerance - to be confirmed across the full set.
+
+### E3. No coordinate inversion in the polygon files - RESOLVED
+
+Both files declare `"crs": { "type": "name", "properties": { "name": "urn:ogc:def:crs:OGC:1.3:CRS84" } }`.
+
+CRS84 is WGS84 with explicit **longitude-latitude** axis order, and the data agrees: the first
+ordinate is ~`18.68` (longitude) and the second ~`-33.86` (latitude), which is correct per RFC
+7946. **No axis swap in either GeoJSON.**
+
+Note the `crs` member itself is a pre-RFC-7946 construct - RFC 7946 removed it and mandates
+CRS84 unconditionally. Harmless, and here it is actively useful as explicit documentation of
+intent.
+
+The equivalent check on the SR data still has to run across all rows (D2). The first records
+look correct - `latitude` ~`-33.87`, `longitude` ~`18.52` - but a per-row classification is
+still needed, since inversion in a real dataset is usually partial rather than wholesale.
+
+### E4. SR schema
+
+```
+notification_number, reference_number, creation_timestamp, completion_timestamp,
+directorate, department, branch, section, code_group, code, cause_code_group,
+cause_code, official_suburb, latitude, longitude, h3_level8_index
+```
+
+- **`notification_number` and `reference_number` carry leading zeros** (e.g. `000400583534`).
+  These **must** be read as strings. Default type inference coerces them to integers and
+  silently destroys the leading zeros, corrupting the join key used to validate against
+  `sr_hex.csv.gz`. Explicit `dtype=str` on both.
+- `creation_timestamp` / `completion_timestamp` are ISO-8601 with a `+02:00` SAST offset.
+- Sampled records are from 2020, consistent with Section 4's reference to "the first 6 months
+  of 2020" (B7).
+- `h3_level8_index` values are 15-character H3 strings (e.g. `88ad360225fffff`), matching the
+  `index` format in the polygon files.
+
+### E5. Physical layout favours streaming
+
+The 8-10 GeoJSON is pretty-printed with **one feature per line**. Each feature is roughly
+500 bytes, so a `S3Object[*].features[*]` path expression keeps every S3 Select record three
+orders of magnitude below the 1 MB record ceiling. The limit flagged as the most likely cause
+of Section 1 failure is comfortably avoided.
+
+### Still open after reconnaissance
+
+- **B4 / B5** - the literal and dtype of the `0` sentinel in `sr_hex.csv.gz`. Needs a record
+  with missing coordinates, which the leading rows do not contain. Resolve by reading the
+  column as `str` and inspecting values whose length is not 15.
+- **D2** - per-row coordinate classification across the full SR dataset.
+- **D4** - coverage of the CoCT boundary.
