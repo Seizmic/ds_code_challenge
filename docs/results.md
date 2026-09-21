@@ -4,7 +4,7 @@
 figure below is read from the manifest of the run that produced it, so this
 document cannot drift from what the code actually did.
 
-Run started `2026-09-20T20:50:05+0200` on Python `3.14.3`.
+Run started `2026-09-21T12:54:32+0200` on Python `3.14.3`.
 
 ---
 
@@ -18,7 +18,7 @@ Run started `2026-09-20T20:50:05+0200` on Python `3.14.3`.
 | Bytes scanned | 108,254,980 |
 | Bytes returned | 1,946,734 |
 | **Transfer reduction** | **98.202%** |
-| Extraction time | 3.220s |
+| Extraction time | 3.471s |
 
 ### Validation against `city-hex-polygons-8.geojson`
 
@@ -85,9 +85,9 @@ vertex cases explicitly.
 ### Efficiency
 
 - Unique coordinate pairs: **460,413** (63.1% of geolocated rows, 1.58x less join work)
-- Geometric join: 0.772s
-- H3 library assignment: 0.357s
-- **Total pipeline: 32.5s**
+- Geometric join: 1.393s
+- H3 library assignment: 0.656s
+- **Total pipeline: 58.4s**
 
 ## Method comparison - geometric vs H3 library
 

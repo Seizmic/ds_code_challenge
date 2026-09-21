@@ -594,6 +594,41 @@ def run(client=None, hex_features: list[dict[str, Any]] | None = None) -> dict[s
     MANIFEST.record_metric("section2.class_b_no_hex_match_rate", round(class_b_rate, 8))
     MANIFEST.record_metric("section2.class_d_invalid_rate", round(class_d_rate, 8))
 
+    # --- Join failure summary, in plain language -----------------------------
+    # Section 2 asks for "logging that lets the executor know how many of the
+    # records failed to join". The rule breakdown above carries that number, but
+    # only to a reader who knows that R4 means a failure and R0 does not. This
+    # states it without requiring the taxonomy, and shows the threshold on a
+    # passing run rather than only when it trips - an operator should be able to
+    # see how much headroom there was, not just that nothing broke.
+    threshold = config.JOIN_ERROR_THRESHOLDS["class_b_no_hex_match"]
+    failed_level = logging.WARNING if n_no_match else logging.INFO
+
+    logger.log(failed_level, "Join failure summary:")
+    logger.log(
+        failed_level,
+        "  %d of %d geolocated records FAILED TO JOIN (%.6f%%)",
+        n_no_match, n_geolocated, class_b_rate * 100,
+    )
+    logger.log(
+        failed_level,
+        "  error threshold %.4f%% -> %s (headroom %.4f%%)",
+        threshold * 100,
+        "PASS" if class_b_rate <= threshold else "EXCEEDED",
+        max(threshold - class_b_rate, 0.0) * 100,
+    )
+    logger.info(
+        "  %d record(s) had no geolocation and were assigned index %s - "
+        "mandated by the spec, not counted as a join failure",
+        int((result["rule"] == RULE_R0_NO_GEOLOCATION).sum()),
+        config.NO_GEOLOCATION_INDEX,
+    )
+    if n_invalid:
+        logger.warning(
+            "  %d record(s) had invalid coordinates (threshold %.4f%%)",
+            n_invalid, config.JOIN_ERROR_THRESHOLDS["class_d_malformed"] * 100,
+        )
+
     # --- Side-car quality output --------------------------------------------
     ambiguous = unique[unique["rule"] == RULE_R3_TIEBREAK]
     if len(ambiguous):
